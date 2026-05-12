@@ -336,10 +336,12 @@ def admin_logout():
     return redirect('/admin_login')
 
 # ==================== ✅ RAILWAY KE LIYE UPDATED CODE ====================
+# ===================== ✅ RAILWAY KE LIYE UPDATED CODE =====================
 if __name__ == "__main__":
-    print("🚀 Starting SecurePay ML Training...")
-    train_model()
-    train_url_model()
-    print("✅ Models Trained Successfully!")
-    port = int(os.environ.get('PORT', 5000))
+    import os
+    port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
+
+# Model training ko hata de ya comment kar de
+# train_model()
+# train_url_model()
