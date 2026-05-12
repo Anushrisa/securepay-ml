@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SecurePay - Admin Login</title>
+    <style>
+        body { font-family: Arial; background: linear-gradient(135deg, #1e3c72, #2a5298); margin: 0; padding: 0; }
+   .container { max-width: 400px; margin: 100px auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+   .logo { text-align: center; color: #1e3c72; font-size: 32px; font-weight: bold; margin-bottom: 10px; }
+   .subtitle { text-align: center; color: #666; margin-bottom: 30px; font-size: 14px; }
+        input { width: 100%; padding: 12px; margin: 10px 0; border: 2px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        button { width: 100%; padding: 14px; background: #1e3c72; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #2a5298; }
+   .error { color: red; text-align: center; margin-top: 10px; background: #ffe6e6; padding: 10px; border-radius: 5px; }
+   .footer { text-align: center; margin-top: 20px; font-size: 12px; color: #999; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">🏦 SecurePay Admin</div>
+        <div class="subtitle">Administrator Portal | RBI Compliant</div>
+        <form method="POST" action="/admin_login">
+            <input type="text" name="username" placeholder="Admin Username" required>
+            <input type="password" name="password" placeholder="Admin Password" required>
+            <button type="submit">Secure Admin Login</button>
+        </form>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <div class="footer">256-bit SSL Encrypted | Authorized Access Only</div>
+    </div>
+</body>
+</html>

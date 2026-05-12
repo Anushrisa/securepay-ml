@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SecurePay - Admin Dashboard | RBI Compliant</title>
+    <meta http-equiv="refresh" content="5">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Roboto', Arial, sans-serif; background: #f0f4f8; color: #2c3e50; }
+     .header { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 18px 40px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 4px 12px rgba(30, 60, 114, 0.3); border-bottom: 3px solid #0d2442; }
+     .logo { font-size: 26px; font-weight: 700; letter-spacing: 0.5px; }
+     .logo span { color: #ffc107; }
+     .header-right { display: flex; align-items: center; gap: 20px; }
+     .live-badge { background: #28a745; padding: 6px 16px; border-radius: 20px; font-size: 12px; font-weight: 500; animation: blink 2s infinite; box-shadow: 0 2px 8px rgba(40, 167, 69, 0.4); }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+     .admin-info { font-size: 14px; }
+     .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 25px; margin: 30px 40px; }
+     .stat-card { background: white; padding: 30px 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); text-align: center; border-top: 5px solid #1e3c72; transition: transform 0.3s, box-shadow 0.3s; }
+     .stat-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.12); }
+     .stat-icon { font-size: 40px; margin-bottom: 10px; }
+     .stat-value { font-size: 38px; font-weight: 700; color: #1e3c72; margin: 10px 0; }
+     .stat-label { color: #7f8c8d; font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
+     .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; margin: 30px 40px; }
+     .chart-box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border: 1px solid #e8eef3; }
+     .chart-title { color: #1e3c72; font-size: 18px; font-weight: 600; margin-bottom: 20px; text-align: center; padding-bottom: 15px; border-bottom: 2px solid #e8eef3; }
+     .container { margin: 30px 40px; background: white; padding: 35px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); border: 1px solid #e8eef3; }
+     .table-header { color: #1e3c72; font-size: 22px; font-weight: 600; border-bottom: 3px solid #1e3c72; padding-bottom: 15px; margin-bottom: 25px; }
+        table { width: 100%; border-collapse: separate; border-spacing: 0; margin-top: 20px; }
+        th { background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; padding: 15px 12px; text-align: left; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; position: sticky; top: 0; border: none; }
+        th:first-child { border-top-left-radius: 8px; }
+        th:last-child { border-top-right-radius: 8px; }
+        td { padding: 14px 12px; text-align: left; border-bottom: 1px solid #ecf0f1; font-size: 14px; }
+        tr:hover { background: #f8fafc; }
+        tr:last-child td { border-bottom: none; }
+     .approved { color: #27ae60; font-weight: 600; }
+     .blocked { color: #e74c3c; font-weight: 600; background: #fff5f5; }
+     .btn { padding: 10px 24px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); color: white; text-decoration: none; border-radius: 6px; font-size: 14px; font-weight: 500; transition: all 0.3s; border: none; cursor: pointer; }
+     .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(30, 60, 114, 0.4); }
+     .logout { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)!important; }
+     .logout:hover { box-shadow: 0 4px 12px rgba(231, 76, 60, 0.4)!important; }
+     .badge { padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: 500; display: inline-block; }
+     .badge-ml { background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%); color: #1565c0; border: 1.5px solid #1976d2; }
+     .badge-rule { background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%); color: #f57c00; border: 1.5px solid #ff9800; }
+     .last-update { text-align: center; color: #95a5a6; font-size: 12px; margin-top: 20px; padding-top: 20px; border-top: 1px solid #ecf0f1; }
+     .fraud-reason { font-size: 11px; color: #7f8c8d; max-width: 220px; line-height: 1.4; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🏦 Secure<span>Pay</span> Admin</div>
+        <div class="header-right">
+            <span class="live-badge">🔴 LIVE MONITORING</span>
+            <div class="admin-info">Welcome, <strong>{{ admin }}</strong></div>
+            <a href="/admin_logout" class="btn logout">Logout</a>
+        </div>
+    </div>
+
+    <div class="stats">
+        <div class="stat-card">
+            <div class="stat-icon">📊</div>
+            <div class="stat-value">{{ total }}</div>
+            <div class="stat-label">Total Transactions</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">✅</div>
+            <div class="stat-value" style="color: #27ae60;">{{ approved }}</div>
+            <div class="stat-label">Approved</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">🚫</div>
+            <div class="stat-value" style="color: #e74c3c;">{{ blocked }}</div>
+            <div class="stat-label">Fraud Blocked</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-icon">💰</div>
+            <div class="stat-value">₹{{ "{:,.0f}".format(total_amount) }}</div>
+            <div class="stat-label">Approved Amount</div>
+        </div>
+    </div>
+
+    <div class="charts">
+        <div class="chart-box">
+            <div class="chart-title">Transaction Status Distribution</div>
+            <canvas id="pieChart"></canvas>
+        </div>
+        <div class="chart-box">
+            <div class="chart-title">Risk Score Analysis</div>
+            <canvas id="barChart"></canvas>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2 class="table-header">Transaction Monitoring - Real Time Feed</h2>
+        {% if transactions %}
+        <table>
+            <tr>
+                <th>Txn ID</th>
+                <th>Customer Email</th>
+                <th>Amount</th>
+                <th>Merchant</th>
+                <th>Risk Score</th>
+                <th>ML Model Used</th>
+                <th>Status</th>
+                <th>Fraud Reason</th>
+                <th>Timestamp</th>
+            </tr>
+            {% for txn in transactions|reverse %}
+            <tr>
+                <td style="font-weight: 500;">{{ txn.transaction_id }}</td>
+                <td>{{ txn.email }}</td>
+                <td style="font-weight: 600;">₹{{ "{:,.2f}".format(txn.amount) }}</td>
+                <td>{{ txn.merchant_verified }}</td>
+                <td>
+                    <strong style="color: {% if txn.risk_score > 75 %}#e74c3c{% elif txn.risk_score > 50 %}#f39c12{% else %}#27ae60{% endif %};">
+                        {{ txn.risk_score }}/100
+                    </strong>
+                </td>
+                <td>
+                    {% if 'RandomForest' in txn.ml_model_name %}
+                    <span class="badge" style="background: #e3f2fd; color: #1565c0; border: 1.5px solid #1976d2;">🤖 {{ txn.ml_model_name }}</span>
+                    {% elif 'XGBoost' in txn.ml_model_name %}
+                    <span class="badge" style="background: #f3e5f5; color: #7b1fa2; border: 1.5px solid #9c27b0;">🚀 {{ txn.ml_model_name }}</span>
+                    {% elif 'Logistic' in txn.ml_model_name %}
+                    <span class="badge" style="background: #e8f5e9; color: #2e7d32; border: 1.5px solid #4caf50;">📊 {{ txn.ml_model_name }}</span>
+                    {% elif 'SVM' in txn.ml_model_name %}
+                    <span class="badge" style="background: #fff3e0; color: #ef6c00; border: 1.5px solid #ff9800;">⚡ {{ txn.ml_model_name }}</span>
+                    {% else %}
+                    <span class="badge badge-rule">⚙️ {{ txn.ml_model_name }}</span>
+                    {% endif %}
+                </td>
+                <td class="{% if txn.result == 'APPROVED' %}approved{% else %}blocked{% endif %}">
+                    {% if txn.result == 'APPROVED' %}✅ APPROVED{% else %}❌ FRAUD{% endif %}
+                </td>
+                <td class="fraud-reason">
+                    {% if txn.result == 'BLOCKED' %}
+                    {{ txn.risk_factors }}
+                    {% else %}
+                    <span style="color: #bdc3c7;">-</span>
+                    {% endif %}
+                </td>
+                <td style="font-size: 13px; color: #7f8c8d;">{{ txn.timestamp[:16] }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+        <p style="text-align: center; color: #95a5a6; padding: 60px; font-size: 16px;">
+            📭 No transactions recorded yet. <br>
+            <span style="font-size: 14px;">Initiate a payment from user dashboard to see real-time data.</span>
+        </p>
+        {% endif %}
+        <div class="last-update">
+            ⏱️ Auto-refresh every 5 seconds | Last synchronized: <span id="time" style="font-weight: 600; color: #1e3c72;"></span>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('time').textContent = new Date().toLocaleTimeString('en-IN');
+
+        new Chart(document.getElementById('pieChart'), {
+            type: 'doughnut',
+            data: {
+                labels: ['APPROVED', 'FRAUD BLOCKED'],
+                datasets: [{
+                    data: [{{ approved }}, {{ blocked }}],
+                    backgroundColor: ['#27ae60', '#e74c3c'],
+                    borderWidth: 3,
+                    borderColor: '#fff',
+                    hoverOffset: 10
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { padding: 20, font: { size: 13, weight: '500' } }
+                    }
+                }
+            }
+        });
+
+        const riskData = {{ risk_data | safe }};
+        new Chart(document.getElementById('barChart'), {
+            type: 'bar',
+            data: {
+                labels: ['Low (0-25)', 'Medium (26-50)', 'High (51-75)', 'Critical (76-100)'],
+                datasets: [{
+                    label: 'Transaction Count',
+                    data: [riskData.low, riskData.medium, riskData.high, riskData.critical],
+                    backgroundColor: ['#27ae60', '#f39c12', '#e67e22', '#e74c3c'],
+                    borderRadius: 8,
+                    borderSkipped: false
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 12 } }, grid: { color: '#ecf0f1' } },
+                    x: { grid: { display: false }, ticks: { font: { size: 12 } } }
+                },
+                plugins: { legend: { display: false } }
+            }
+        });
+    </script>
+</body>
+</html>

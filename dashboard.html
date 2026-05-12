@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SecurePay - Dashboard</title>
+    <style>
+        body { font-family: Arial; background: #f5f5f5; margin: 0; }
+       .header { background: #1e3c72; color: white; padding: 15px 30px; display: flex; justify-content: space-between; align-items: center; }
+       .container { max-width: 600px; margin: 40px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h2 { color: #1e3c72; border-bottom: 3px solid #1e3c72; padding-bottom: 10px; }
+        input { width: 100%; padding: 12px; margin: 8px 0; border: 2px solid #ddd; border-radius: 5px; box-sizing: border-box; }
+        button { width: 100%; padding: 14px; background: #28a745; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; margin-top: 15px; }
+        button:hover { background: #218838; }
+       .logout { background: #dc3545; padding: 8px 20px; border-radius: 5px; color: white; text-decoration: none; }
+        label { font-weight: bold; color: #333; display: block; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div style="font-size: 24px; font-weight: bold;">🏦 SecurePay</div>
+        <div>{{ user }} | <a href="/logout" class="logout">Logout</a></div>
+    </div>
+    <div class="container">
+        <h2>New Transaction</h2>
+        <form method="POST" action="/check_site">
+            <label>Card Number</label>
+            <input type="text" name="card" placeholder="1234 5678 9012 3456" maxlength="19" required>
+
+            <label>Card PIN</label>
+            <input type="password" name="pin" placeholder="****" maxlength="4" required>
+
+            <label>Amount (₹)</label>
+            <input type="number" name="amount" placeholder="Enter Amount" min="1" required>
+
+            <label>Merchant Website/URL</label>
+            <input type="text" name="merchant_url" placeholder="amazon.in or https://example.com" required>
+
+            <input type="hidden" name="lat" id="lat">
+            <input type="hidden" name="lon" id="lon">
+
+            <button type="submit">Verify & Proceed</button>
+        </form>
+    </div>
+    <script>
+        if(navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                document.getElementById('lat').value = pos.coords.latitude;
+                document.getElementById('lon').value = pos.coords.longitude;
+            });
+        }
+    </script>
+</body>
+</html>
