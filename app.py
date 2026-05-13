@@ -14,8 +14,8 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'securepay-secret-2024')
 
 # ========== SMTP CONFIG ==========
-SMTP_EMAIL = os.environ.get('SMTP_EMAIL', 'your-email@gmail.com')
-SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'your-app-password')
+SMTP_EMAIL = os.environ.get('SMTP_EMAIL', 'Vanshikauser65@gmail.com')
+SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'gahcyhlytluunzlz')
 
 # ========== GLOBAL ==========
 ml_model = None
@@ -232,4 +232,5 @@ if __name__ == "__main__":
     train_url_model()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
 
