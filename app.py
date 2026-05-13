@@ -262,7 +262,7 @@ def verify_otp():
         "transaction_id": f"TXN{random.randint(100000,999999)}",
         "email": email,
         "card_masked": "**** **** **** " + data['card'][-4:],
-        "amount": data['amount"],
+        "amount": data["amount"],
         "merchant_input": data['merchant_input'],
         "merchant_verified": data['merchant_domain'],
         "rbi_approved": data['is_approved'],
