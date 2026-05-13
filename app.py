@@ -21,10 +21,11 @@ SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'gahcyhlytluunzlz')
 ml_model = None
 url_model = None
 
-# ========== DEMO USERS - Yaha password set kar sakte ho ==========
+# ========== DEMO USERS ==========
 DEMO_USERS = {
     'admin@securepay.com': 'admin123',
     'user@securepay.com': 'user123'
+    'Vanshikauser65@gmail.com': 'user123'
 }
 
 def train_model():
@@ -114,15 +115,14 @@ def index():
 
 @app.route('/login', methods=['POST'])
 def login():
-    email = request.form.get('email', '').strip().lower() # 👈 FIX:.lower() add kiya
+    email = request.form.get('email', '').strip().lower()
     password = request.form.get('password', '').strip()
 
-    print(f"LOGIN TRY: {email} | {password}") # Debug ke liye
+    print(f"LOGIN TRY: {email} | {password}")
 
     if not validate_email(email):
         return render_template('login.html', error="Valid Email ID required")
 
-    # Password check
     if email in DEMO_USERS and DEMO_USERS[email] == password:
         session['user'] = email
         return redirect('/dashboard')
@@ -181,7 +181,8 @@ def check_site():
 
 @app.route('/send_otp', methods=['POST'])
 def send_otp():
-    if 'user' not in session or 'txn_details' not in session: return redirect('/')
+    if 'user' not in session or 'txn_details' not in session:
+        return redirect('/')
 
     action = request.form.get('action', '')
     if action == 'cancel':
@@ -195,7 +196,7 @@ def send_otp():
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_EMAIL
-        msg['To'] = session['user'] # 👈 Jisse login kiya usi pe OTP jayega
+        msg['To'] = session['user']
         msg['Subject'] = f"SecurePay OTP: {otp}"
 
         body = f"""
@@ -219,9 +220,11 @@ def send_otp():
 
     except Exception as e:
         print(f"❌ OTP Error: {e}")
-        return render_template('otp.html', error=f"OTP failed: {e}", email=session['user'])
+        # 👇 FIX: amount add kiya taaki otp.html crash na ho
+        return render_template('otp.html', error=f"OTP failed: {str(e)}", email=session['user'], amount=txn['amount'])
 
-    return render_template('otp.html', email=session['user'])
+    # 👇 FIX: amount add kiya taaki otp.html crash na ho
+    return render_template('otp.html', email=session['user'], amount=txn['amount'])
 
 @app.route('/verify_otp', methods=['POST'])
 def verify_otp():
@@ -236,7 +239,8 @@ def verify_otp():
                                risk=txn['final_risk'], txn_id=txn['txn_id'],
                                masked_card=txn['masked_card'])
     else:
-        return render_template('otp.html', error="Invalid OTP", email=session['user'])
+        txn = session['txn_details']
+        return render_template('otp.html', error="Invalid OTP", email=session['user'], amount=txn['amount'])
 
 @app.route('/logout')
 def logout():
