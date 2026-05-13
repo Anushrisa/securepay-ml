@@ -114,8 +114,10 @@ def index():
 
 @app.route('/login', methods=['POST'])
 def login():
-    email = request.form.get('email', '').strip()
+    email = request.form.get('email', '').strip().lower() # 👈 FIX:.lower() add kiya
     password = request.form.get('password', '').strip()
+
+    print(f"LOGIN TRY: {email} | {password}") # Debug ke liye
 
     if not validate_email(email):
         return render_template('login.html', error="Valid Email ID required")
@@ -193,17 +195,31 @@ def send_otp():
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_EMAIL
-        msg['To'] = session['user']
-        msg['Subject'] = "SecurePay - Transaction OTP"
-        body = f"<html><body><h2>🏦 SecurePay</h2><h1>OTP: {otp}</h1><p>Amount: ₹{txn['amount']}</p><p>Merchant: {txn['merchant_domain']}</p></body></html>"
+        msg['To'] = session['user'] # 👈 Jisse login kiya usi pe OTP jayega
+        msg['Subject'] = f"SecurePay OTP: {otp}"
+
+        body = f"""
+        <html><body>
+        <h2>🏦 SecurePay</h2>
+        <h1 style="color:#1e3c72;">Your OTP: {otp}</h1>
+        <p><b>Amount:</b> ₹{txn['amount']}</p>
+        <p><b>Merchant:</b> {txn['merchant_domain']}</p>
+        <p><b>Txn ID:</b> {txn['txn_id']}</p>
+        <p style="color:red;">Valid for 10 minutes. Do not share with anyone.</p>
+        </body></html>
+        """
         msg.attach(MIMEText(body, 'html'))
+
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.send_message(msg)
         server.quit()
+        print(f"✅ OTP {otp} sent to {session['user']}")
+
     except Exception as e:
-        print(f"OTP Error: {e}")
+        print(f"❌ OTP Error: {e}")
+        return render_template('otp.html', error=f"OTP failed: {e}", email=session['user'])
 
     return render_template('otp.html', email=session['user'])
 
@@ -232,6 +248,3 @@ if __name__ == "__main__":
     train_url_model()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-
-
