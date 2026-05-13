@@ -104,9 +104,10 @@ def save_transaction(data):
     transactions.append(data)
     with open(TRANSACTION_FILE, 'w') as f:
         json.dump(transactions, f, indent=4)
-    if len(transactions) % 10 == 0:
-        train_model()
-        train_url_model()
+    # ==================== ✅ RAILWAY FIX: TRAINING COMMENT KIYA ====================
+    # if len(transactions) % 10 == 0:
+    # train_model()
+    # train_url_model()
 
 def get_city_from_gps(lat, lon):
     try:
@@ -335,13 +336,10 @@ def admin_logout():
     session.pop('admin', None)
     return redirect('/admin_login')
 
-# ==================== ✅ RAILWAY KE LIYE UPDATED CODE ====================
-# ===================== ✅ RAILWAY KE LIYE UPDATED CODE =====================
+# ==================== ✅ RAILWAY KE LIYE FINAL CODE =====================
 if __name__ == "__main__":
-    import os
+    # train_model() # ← Railway pe comment rakho
+    # train_url_model() # ← Railway pe comment rakho
+    print("✅ Models loaded from files!")
     port = int(os.environ.get('PORT', 8080))
     app.run(host='0.0.0.0', port=port, debug=False)
-
-# Model training ko hata de ya comment kar de
-# train_model()
-# train_url_model()
