@@ -24,7 +24,7 @@ url_model = None
 # ========== DEMO USERS ==========
 DEMO_USERS = {
     'admin@securepay.com': 'admin123',
-    'user@securepay.com': 'user123'
+    'user@securepay.com': 'user123' ,
     'Vanshikauser65@gmail.com': 'user123'
 }
 
