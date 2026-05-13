@@ -21,7 +21,12 @@ SMTP_PASSWORD = os.environ.get('SMTP_PASSWORD', 'your-app-password')
 ml_model = None
 url_model = None
 
-# ========== ML MODELS ==========
+# ========== DEMO USERS - Yaha password set kar sakte ho ==========
+DEMO_USERS = {
+    'admin@securepay.com': 'admin123',
+    'user@securepay.com': 'user123'
+}
+
 def train_model():
     global ml_model
     data = {
@@ -93,16 +98,13 @@ def run_ml_analysis(amount, lat, lon, is_approved, card_valid):
         day = datetime.now().weekday()
         features2 = np.array([[float(amount), hour, day, 1]])
         anomaly = url_model.decision_function(features2)[0]
-        anomaly_score = int((1 - anomaly) * 50)
+        anomaly_score = max(0, min(100, int((1 - anomaly) * 50)))
         final_risk = int((risk_score + anomaly_score) / 2)
-        fraud_detected = False
-        model_name = "RandomForest+IsolationForest"
-        if final_risk > 70 or (not is_approved and amount > 10000):
-            fraud_detected = True
-        elif is_approved and amount < 50000:
-            final_risk = int(final_risk * 0.5)
-        return final_risk, model_name, risk_score, anomaly_score, fraud_detected
-    except:
+        fraud_detected = final_risk > 70 or (not is_approved and amount > 10000)
+        if is_approved and amount < 50000: final_risk = int(final_risk * 0.5)
+        return final_risk, "RandomForest+IsolationForest", risk_score, anomaly_score, fraud_detected
+    except Exception as e:
+        print(f"ML Error: {e}")
         return 25, "Default", 25, 25, False
 
 # ========== ROUTES ==========
@@ -113,10 +115,17 @@ def index():
 @app.route('/login', methods=['POST'])
 def login():
     email = request.form.get('email', '').strip()
+    password = request.form.get('password', '').strip()
+
     if not validate_email(email):
         return render_template('login.html', error="Valid Email ID required")
-    session['user'] = email
-    return redirect('/dashboard')
+
+    # Password check
+    if email in DEMO_USERS and DEMO_USERS[email] == password:
+        session['user'] = email
+        return redirect('/dashboard')
+    else:
+        return render_template('login.html', error="Invalid Email or Password")
 
 @app.route('/dashboard')
 def dashboard():
@@ -127,42 +136,46 @@ def dashboard():
 def check_site():
     if 'user' not in session: return redirect('/')
 
-    card = request.form.get('card', '').strip()
-    pin = request.form.get('pin', '').strip()
-    merchant_input = request.form.get('merchant_url', '').strip()
-
-    try: amount = float(request.form.get('amount', 0))
-    except: amount = 0
-
     try:
+        card = request.form.get('card', '').strip()
+        pin = request.form.get('pin', '').strip()
+        merchant_input = request.form.get('merchant_url', '').strip()
+        amount = float(request.form.get('amount', 0))
         lat = float(request.form.get('lat', 0))
         lon = float(request.form.get('lon', 0))
-        if lat == 0: city, lat, lon = get_location()
+
+        if lat == 0 or lon == 0: city, lat, lon = get_location()
         else: city = "User Location"
-    except: city, lat, lon = get_location()
 
-    card_valid, card_msg = validate_card(card, pin)
-    if not merchant_input: return render_template('result.html', result="ERROR", final_msg="Merchant URL required")
-    if amount <= 0: return render_template('result.html', result="ERROR", final_msg="Amount must be > 0")
-    if not card_valid: return render_template('result.html', result="ERROR", final_msg=card_msg)
+        card_valid, card_msg = validate_card(card, pin)
+        if not merchant_input: return render_template('result.html', result="ERROR", final_msg="Merchant URL required")
+        if amount <= 0: return render_template('result.html', result="ERROR", final_msg="Amount must be > 0")
+        if not card_valid: return render_template('result.html', result="ERROR", final_msg=card_msg)
 
-    is_approved, merchant_domain = is_rbi_approved_merchant(merchant_input)
-    final_risk, ml_model_name, risk_score, anomaly_score, fraud_detected = run_ml_analysis(amount, lat, lon, is_approved, 1)
+        is_approved, merchant_domain = is_rbi_approved_merchant(merchant_input)
+        final_risk, ml_model_name, risk_score, anomaly_score, fraud_detected = run_ml_analysis(amount, lat, lon, is_approved, 1)
 
-    if fraud_detected:
-        return render_template('result.html', result="FRAUD DETECTED",
-                               final_msg=f"Transaction Blocked. Risk: {final_risk}/100", risk=final_risk)
+        if fraud_detected:
+            return render_template('result.html', result="FRAUD DETECTED",
+                                   final_msg=f"Transaction Blocked. Risk: {final_risk}/100", risk=final_risk)
 
-    session['txn_details'] = {
-        'merchant': merchant_input, 'merchant_domain': merchant_domain, 'amount': amount,
-        'final_risk': final_risk, 'ml_model_name': ml_model_name, 'city': city,
-        'masked_card': "**** **** **** " + card.replace(" ", "")[-4:], 'txn_id': f"TXN{random.randint(10000000, 99999999)}"
-    }
+        session['txn_details'] = {
+            'merchant': merchant_input, 'merchant_domain': merchant_domain, 'amount': amount,
+            'final_risk': final_risk, 'risk_score': risk_score, 'anomaly_score': anomaly_score,
+            'ml_model_name': ml_model_name, 'city': city, 'lat': lat, 'lon': lon,
+            'masked_card': "**** **** **** " + card.replace(" ", "")[-4:],
+            'txn_id': f"TXN{random.randint(10000000, 99999999)}", 'is_approved': is_approved
+        }
 
-    return render_template('approve.html', amount=amount, merchant=merchant_input,
-                           verified_as=merchant_domain, check_method=ml_model_name,
-                           final_risk=final_risk, masked_card=session['txn_details']['masked_card'],
-                           city=city, is_approved=is_approved)
+        return render_template('approve.html', amount=amount, merchant=merchant_input,
+                               verified_as=merchant_domain, check_method=ml_model_name,
+                               final_risk=final_risk, risk_score=risk_score, anomaly_score=anomaly_score,
+                               masked_card=session['txn_details']['masked_card'],
+                               city=city, lat=lat, lon=lon, is_approved=is_approved)
+
+    except Exception as e:
+        print(f"Check Site Error: {e}")
+        return render_template('result.html', result="ERROR", final_msg="Something went wrong. Try again.")
 
 @app.route('/send_otp', methods=['POST'])
 def send_otp():
