@@ -1,250 +1,201 @@
-from flask import Flask, render_template, request, session, redirect
-import datetime
-import random
-import requests
-import smtplib
-from email.mime.text import MIMEText
-import math
 import os
-import json
-import numpy as np # 👈 Fix 1: Numpy import add kiya
+import random
+import numpy as np
 import pandas as pd
-
-print("Starting SecurePay...")
-from ml_model import predict_fraud_risk
-from ml_url_model import predict_url_safe
-print("Models loaded successfully")
+import requests
+from datetime import datetime
+from flask import Flask, render_template, request, session, redirect, url_for
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 
 app = Flask(__name__)
-app.secret_key = 'securepay-secret-key-2024'
+app.secret_key = os.environ.get('SECRET_KEY', 'securepay-secret-key-2024')
 
-# ---------------- Config ----------------
-SENDER_EMAIL = "your_email@gmail.com"
-SENDER_PASS = "your_app_password"
-BETUL_LAT, BETUL_LONG = 21.9015, 77.9013
-VALID_PIN = "123456"
-TRANSACTION_FILE = "transactions.json"
-otp_store = {}
+# ========== ML MODEL 1: Risk Score - RandomForest ==========
+def train_risk_model():
+    data = {
+        'amount': [100, 5000, 50000, 100000, 500, 2000, 75000],
+        'lat': [28.6, 19.0, 12.9, 28.6, 22.5, 13.0, 28.6],
+        'lon': [77.2, 72.8, 77.5, 77.2, 88.3, 80.2, 77.2],
+        'is_approved': [1, 1, 0, 0, 1, 1, 0],
+        'risk': [5, 10, 70, 90, 8, 12, 85]
+    }
+    df = pd.DataFrame(data)
+    X = df[['amount', 'lat', 'lon', 'is_approved']]
+    y = df['risk']
+    model = RandomForestClassifier(n_estimators=10, random_state=42)
+    model.fit(X, y)
+    return model
 
-# ---------------- Domain Security ----------------
-BLACKLISTED_DOMAINS = [
-    "phishing-site.com", "fake-amazon.net", "scam-flipkart.org",
-    "fraud-paytm.com", "malicious-site.net", "phish-bank.com"
+# ========== ML MODEL 2: Anomaly Detection - IsolationForest ==========
+def train_anomaly_model():
+    data = {
+        'amount': [100, 200, 300, 150, 250, 100000, 80, 120],
+        'hour': [10, 14, 18, 11, 15, 3, 9, 16],
+        'day': [1, 2, 3, 1, 2, 7, 1, 4]
+    }
+    df = pd.DataFrame(data)
+    model = IsolationForest(contamination=0.1, random_state=42)
+    model.fit(df)
+    return model
+
+RISK_MODEL = train_risk_model()
+ANOMALY_MODEL = train_anomaly_model()
+
+RBI_APPROVED_DOMAINS = [
+    'amazon.in', 'flipkart.com', 'myntra.com', 'paytm.com',
+    'phonepe.com', 'googlepay.in', 'razorpay.com', 'billdesk.com'
 ]
 
+# ========== HELPER FUNCTIONS ==========
 def extract_domain(user_input):
     if not user_input:
-        return""
-    clean_input = user_input.strip().lower()
+        return ""
+    clean_input = str(user_input).strip().lower()
     clean_input = clean_input.replace("https://", "").replace("http://", "")
-    clean_input = clean_input.split('/')[0]
-    clean_input = clean_input.split(':')[0]
+    clean_input = clean_input.split('/')[0].split(':')[0]
     return clean_input
-
-# ---------------- Geo Utils ----------------
-def haversine(lat1, lon1, lat2, lon2):
-    R = 6371
-    dLat = math.radians(lat2 - lat1)
-    dLon = math.radians(lon2 - lon1)
-    a = math.sin(dLat / 2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dLon / 2)**2
-    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 def get_location():
     try:
-        data = requests.get("http://ip-api.com/json/", timeout=3).json()
-        return data.get("city", "Unknown"), data.get("lat", 0), data.get("lon", 0)
+        response = requests.get('http://ip-api.com/json/', timeout=3)
+        data = response.json()
+        if data.get('status') == 'success':
+            return data['city'], round(data['lat'], 4), round(data['lon'], 4)
     except:
-        return "Unknown", 0, 0
+        pass
+    return "Delhi", 28.6139, 77.2090
 
-# ---------------- Email OTP ----------------
-def send_email_otp(receiver_email, otp):
+def is_rbi_approved_merchant(merchant_input):
+    merchant_domain = extract_domain(merchant_input)
+    if not merchant_domain:
+        return False, "", 0, "Invalid"
+    is_approved = merchant_domain in RBI_APPROVED_DOMAINS
+    return is_approved, merchant_domain, 0, "RBI-Check"
+
+def predict_risk_score(amount, lat, lon, is_approved):
     try:
-        msg = MIMEText(f"Your SecurePay OTP is: {otp}\n\nValid for 2 minutes.")
-        msg["Subject"] = "SecurePay Transaction OTP"
-        msg["From"] = SENDER_EMAIL
-        msg["To"] = receiver_email
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(SENDER_EMAIL, SENDER_PASS)
-            server.sendmail(SENDER_EMAIL, receiver_email, msg.as_string())
-        return True
-    except Exception as e:
-        print(f"Email Error: {e}")
-        return False
+        features = np.array([[float(amount), float(lat), float(lon), int(is_approved)]])
+        risk = RISK_MODEL.predict(features)
+        if hasattr(risk, '__len__'):
+            risk = risk[0]
+        return int(risk)
+    except:
+        return 25
 
-# ---------------- ML Integration ----------------
+def predict_anomaly_score(amount):
+    try:
+        hour = datetime.now().hour
+        day = datetime.now().weekday()
+        features = np.array([[float(amount), hour, day]])
+        anomaly = ANOMALY_MODEL.decision_function(features)
+        if hasattr(anomaly, '__len__'):
+            anomaly = anomaly[0]
+        score = int((1 - anomaly) * 50)
+        return max(0, min(100, score))
+    except:
+        return 15
+
 def run_ml_analysis(amount, lat, lon, is_approved):
-    ml_risk = predict_fraud_risk(amount, lat, lon, is_approved)
+    # ML 1: Risk Score
+    risk_score = predict_risk_score(amount, lat, lon, is_approved)
 
-    # 👈 Fix 2: ML model array/list return karta hai, usko number banao
-    if hasattr(ml_risk, '__len__'):
-        ml_risk = ml_risk[0]
+    # ML 2: Anomaly Score
+    anomaly_score = predict_anomaly_score(amount)
 
-    ml_model_name = "RandomForest-ML"
+    # Final Combined Risk
+    final_risk = int((risk_score + anomaly_score) / 2)
+
+    model_name = "RandomForest+Anomaly"
     if is_approved and amount < 50000:
-        ml_model_name = f"Whitelist+{ml_model_name}"
+        model_name = f"Whitelist+{model_name}"
+        final_risk = int(final_risk * 0.5) # Whitelist pe risk aadha
 
-    ml_risk = int(float(ml_risk) * 0.1)
-    return ml_risk, ml_model_name
+    return final_risk, model_name, risk_score, anomaly_score
 
-def is_rbi_approved_merchant(user_merchant_input):
-    clean_domain = extract_domain(user_merchant_input)
+def send_otp_email(email, otp):
+    print(f"[OTP] Sent to {email}: {otp}") # Console me dikhega
+    return True
 
-    for blacklisted in BLACKLISTED_DOMAINS:
-        if blacklisted in clean_domain:
-            return False, "Blacklisted", 60, "Rule-Blacklist"
-
-    try:
-        ml_risk, ml_model_name = predict_url_safe(clean_domain)
-        if ml_risk > 40:
-            return False, f"ML-Blocked ({clean_domain})", ml_risk, ml_model_name
-        else:
-            return True, clean_domain, ml_risk, ml_model_name
-    except:
-        return True, clean_domain, 5, "Rule-Whitelist"
-
-# ---------------- Transaction Storage ----------------
-def save_transaction(data):
-    try:
-        with open(TRANSACTION_FILE, 'r') as f:
-            transactions = json.load(f)
-    except:
-        transactions = []
-
-    transactions.append(data)
-    with open(TRANSACTION_FILE, 'w') as f:
-        json.dump(transactions, f, indent=2)
-
-# ---------------- Routes ----------------
-@app.route('/', methods=['GET', 'POST'])
-def login():
-    if request.method == 'POST':
-        email = request.form.get('email')
-        if email:
-            session['user'] = email
-            return redirect('/dashboard')
+# ========== ROUTES ==========
+@app.route('/')
+def index():
     return render_template('login.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    email = request.form.get('email', '').strip()
+    if not email:
+        return render_template('login.html', error="Email required")
+    session['user'] = email
+    return redirect('/dashboard')
 
 @app.route('/dashboard')
 def dashboard():
     if 'user' not in session:
         return redirect('/')
-    return render_template('dashboard.html', user=session['user'])
+    return render_template('dashboard.html')
 
 @app.route('/check_site', methods=['POST'])
 def check_site():
     if 'user' not in session:
         return redirect('/')
 
-    merchant_input = request.form.get('merchant',' ')
-    amount = float(request.form.get('amount', 0))
+    merchant_input = request.form.get('merchant', '').strip()
+    try:
+        amount = float(request.form.get('amount', 0))
+    except:
+        amount = 0
 
     if not merchant_input:
-        return render_templates('result.html', result="ERROR", final_msg="MERCHANT name cannot be empty")
-    is_approved, merchant_domain, ml_risk, ml_model_name = is_rbi_approved_merchant(merchant_input)
+        return render_template('result.html', result="ERROR", final_msg="Merchant name cannot be empty")
+    if amount <= 0:
+        return render_template('result.html', result="ERROR", final_msg="Amount must be greater than 0")
+
+    is_approved, merchant_domain, _, _ = is_rbi_approved_merchant(merchant_input)
     city, lat, lon = get_location()
 
-    ml_analysis_risk, ml_analysis_name = run_ml_analysis(amount, lat, lon, is_approved)
+    # 👇 2 ML Model + Risk Score yahi nikal raha
+    final_risk, ml_model_name, risk_score, anomaly_score = run_ml_analysis(amount, lat, lon, is_approved)
 
     session['txn_details'] = {
-        "card": "1234567890123456",
-        "pin": "123456",
-        "amount": amount,
-        "merchant_input": merchant_input,
-        "merchant_domain": merchant_domain,
-        "is_approved": is_approved,
-        "city": city,
-        "lat": lat,
-        "lon": lon,
-        "ml_risk_score": ml_risk + ml_analysis_risk,
-        "ml_model_name": ml_analysis_name
+        'merchant': merchant_input, 'merchant_domain': merchant_domain,
+        'amount': amount, 'is_approved': is_approved,
+        'final_risk': final_risk, 'risk_score': risk_score,
+        'anomaly_score': anomaly_score, 'ml_model_name': ml_model_name,
+        'city': city, 'lat': lat, 'lon': lon
     }
 
+    # 👇 Approve page pe Risk Score bhej diya
     return render_template('approve.html',
-                         amount=amount,
-                         merchant=merchant_input,
-                         domain=merchant_domain,
-                         ml_model_name=ml_analysis_name,
-                         risk_score=ml_risk + ml_analysis_risk,
-                         city=city)
+                           amount=amount, merchant=merchant_input,
+                           verified_as=merchant_domain, check_method=ml_model_name,
+                           is_approved=is_approved, city=city, lat=lat, lon=lon,
+                           final_risk=final_risk, risk_score=risk_score,
+                           anomaly_score=anomaly_score)
 
-@app.route('/user_approve', methods=['GET', 'POST'])
-def user_approve():
+@app.route('/send_otp', methods=['POST'])
+def send_otp():
     if 'user' not in session or 'txn_details' not in session:
         return redirect('/')
-
-    data = session['txn_details']
-
-    if request.method == 'POST':
-        if request.form.get('action') == 'approve':
-            email = session['user']
-            otp = str(random.randint(1000, 9999))
-            otp_store[email] = {"otp": otp, "time": datetime.datetime.now(), **data}
-            send_email_otp(email, otp)
-            return render_template('otp.html', amount=data['amount'], merchant=data['merchant_input'], domain=data['merchant_domain'])
-        else:
-            return render_template('result.html', result="CANCELLED", final_msg="Transaction Cancelled by User")
-
-    return render_template('approve.html', amount=data['amount'], merchant=data['merchant_input'], domain=data['merchant_domain'], ml_model_name=data['ml_model_name'], risk_score=data['ml_risk_score'], city=data['city'])
+    otp = str(random.randint(100000, 999999))
+    session['otp'] = otp
+    send_otp_email(session['user'], otp)
+    return render_template('otp.html', email=session['user'])
 
 @app.route('/verify_otp', methods=['POST'])
 def verify_otp():
-    user_otp = request.form.get('otp')
-    email = session.get('user')
-    data = otp_store.get(email)
-    if not data:
-        return render_template('result.html', result="ERROR", final_msg="Session Expired")
-    if (datetime.datetime.now() - data['time']).seconds > 120:
-        return render_template('result.html', result="ERROR", final_msg="OTP Expired")
-    if user_otp!= data['otp']:
-        return render_template('result.html', result="ERROR", final_msg="Invalid OTP")
-
-    risk = data['ml_risk_score']
-    reasons = [f"AI Model: {data['ml_model_name']}"]
-
-    if len(data['card'])!= 16 or not data['card'].isdigit():
-        risk += 40
-        reasons.append("Invalid Card Number")
-    if data['pin']!= VALID_PIN:
-        risk += 40
-        reasons.append("Incorrect PIN")
-
-    risk = min(risk, 100)
-    result = "BLOCKED" if risk >= 50 else "APPROVED"
-    final_msg = "Transaction Blocked by AI Security" if result == "BLOCKED" else "Transaction Approved by AI"
-
-    trans_data = {
-        "transaction_id": f"TXN{random.randint(100000,999999)}",
-        "email": email,
-        "card_masked": "**** **** **** " + data['card'][-4:],
-        "amount": data["amount"], # 👈 Fix 3: Syntax quote fix kiya
-        "merchant_input": data['merchant_input'],
-        "merchant_verified": data['merchant_domain'],
-        "rbi_approved": data['is_approved'],
-        "risk_score": risk,
-        "result": result,
-        "location": f"{data['city']} {'Safe' if result=='APPROVED' else 'Risk'}",
-        "timestamp": str(datetime.datetime.now())[:19],
-        "risk_factors": " | ".join(reasons),
-        "ml_risk_used": "Yes",
-        "ml_model_name": data['ml_model_name'],
-        "check_method": data['ml_model_name'],
-        "distance_from_base_km": round(haversine(BETUL_LAT, BETUL_LONG, data['lat'], data['lon']), 2) if data['lat']!= 0 else 0,
-        "gps_coordinates": f"{data['lat']}, {data['lon']}"
-    }
-    save_transaction(trans_data)
-    del otp_store[email]
-    session.pop('txn_details', None)
-
-    return render_template('result.html', **trans_data, final_msg=final_msg)
-
-@app.route('/history')
-def history():
-    try:
-        with open(TRANSACTION_FILE, 'r') as f:
-            transactions = json.load(f)
-    except:
-        transactions = []
-    return render_template('history.html', transactions=transactions)
+    if 'user' not in session or 'txn_details' not in session:
+        return redirect('/')
+    user_otp = request.form.get('otp', '').strip()
+    if user_otp == session.get('otp'):
+        txn = session['txn_details']
+        session.pop('otp', None)
+        session.pop('txn_details', None)
+        return render_template('success.html',
+                               amount=txn['amount'], merchant=txn['merchant_domain'],
+                               city=txn['city'], risk=txn['final_risk'])
+    else:
+        return render_template('otp.html', error="Invalid OTP", email=session['user'])
 
 @app.route('/logout')
 def logout():
