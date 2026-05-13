@@ -5,11 +5,8 @@ import smtplib
 import requests
 import json
 import pandas as pd
-import os
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
-from ml_model import predict_fraud_risk, train_model
-from ml_url_model import predict_url_safe, train_url_model
 
 app = Flask(__name__)
 app.secret_key = "SecurePay_2026_RBI_Compliant_ML_@#$"
@@ -20,6 +17,25 @@ USER_PASS = "1234"
 VALID_PIN = "1111"
 ADMIN_USERNAME = "admin"
 ADMIN_PASS = "admin@123"
+
+# ==================== LAZY LOADING - RAM BACHANE KE LIYE ====================
+MODEL_CACHE = {}
+
+def get_fraud_model_func():
+    """Main fraud model function lazy load"""
+    if 'fraud_predict' not in MODEL_CACHE:
+        print("Loading fraud model...")
+        from ml_model import predict_fraud_risk
+        MODEL_CACHE['fraud_predict'] = predict_fraud_risk
+    return MODEL_CACHE['fraud_predict']
+
+def get_url_model_func():
+    """URL safety model lazy load"""
+    if 'url_predict' not in MODEL_CACHE:
+        print("Loading URL model...")
+        from ml_url_model import predict_url_safe
+        MODEL_CACHE['url_predict'] = predict_url_safe
+    return MODEL_CACHE['url_predict']
 
 def send_email_otp(receiver_email, otp):
     sender_email = "vanshikauser65@gmail.com"
@@ -79,6 +95,8 @@ def is_rbi_approved_merchant(user_merchant_input):
         for keyword in keywords:
             if keyword in user_merchant_input.lower():
                 return True, official_domain, 0, "Rule-Keyword"
+
+    predict_url_safe = get_url_model_func()
     ml_safe_score = predict_url_safe(clean_domain)
     if ml_safe_score is not None:
         if ml_safe_score >= 80:
@@ -104,15 +122,11 @@ def save_transaction(data):
     transactions.append(data)
     with open(TRANSACTION_FILE, 'w') as f:
         json.dump(transactions, f, indent=4)
-    # ==================== ✅ RAILWAY FIX: TRAINING COMMENT KIYA ====================
-    # if len(transactions) % 10 == 0:
-    # train_model()
-    # train_url_model()
 
 def get_city_from_gps(lat, lon):
     try:
         res = requests.get(f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json",
-                          headers={'User-Agent': 'SecurePay-RBI-Compliant/1.0'}, timeout=3)
+                          headers={'User-Agent': 'SecurePay-RBI-Compliant/1.0'}, timeout=5)
         data = res.json()
         address = data.get('address', {})
         city = address.get('city') or address.get('town') or address.get('village') or address.get('state')
@@ -152,50 +166,13 @@ def check_site():
     merchant_input = request.form.get('merchant_url')
     lat = float(request.form.get('lat', 0)) if request.form.get('lat') else 0
     lon = float(request.form.get('lon', 0)) if request.form.get('lon') else 0
-
     is_approved, matched_domain, merchant_risk, check_method = is_rbi_approved_merchant(merchant_input)
-
     session['txn_details'] = {
         "card": card, "pin": pin, "amount": amount, "merchant_input": merchant_input,
         "merchant_domain": matched_domain, "lat": lat, "lon": lon,
         "is_approved": is_approved, "check_method": check_method, "merchant_risk": merchant_risk
     }
-
     if not is_approved or merchant_risk >= 60:
-        dist_from_betul = haversine(BETUL_LAT, BETUL_LONG, lat, lon) if lat!= 0 else 0
-        city_gps = get_city_from_gps(lat, lon) if lat!= 0 else "GPS Disabled"
-        current_hour = datetime.datetime.now().hour
-
-        ml_result = predict_fraud_risk(amount, current_hour, dist_from_betul, is_approved)
-        if ml_result[0] is not None:
-            final_risk = max(60, ml_result[0])
-            ml_model_name = ml_result[1]
-        else:
-            final_risk = 60
-            ml_model_name = "Rule-Engine"
-
-        trans_data = {
-            "transaction_id": f"TXN{random.randint(100000,999999)}",
-            "email": session['user'],
-            "card_masked": "**** **** **** " + card[-4:] if len(card) >= 4 else "****",
-            "amount": amount,
-            "merchant_input": merchant_input,
-            "merchant_verified": matched_domain,
-            "rbi_approved": is_approved,
-            "risk_score": final_risk,
-            "result": "BLOCKED",
-            "location": f"{city_gps} ⚠️",
-            "timestamp": str(datetime.datetime.now())[:19],
-            "risk_factors": f"Blacklisted Merchant | {check_method} | ML: {ml_model_name}",
-            "ml_risk_used": "Yes 🤖",
-            "ml_model_name": ml_model_name,
-            "ml_url_used": "Yes 🤖" if "ML" in check_method else "No",
-            "check_method": check_method,
-            "distance_from_base_km": round(dist_from_betul, 2),
-            "gps_coordinates": f"{lat}, {lon}"
-        }
-        save_transaction(trans_data)
-
         return render_template('blocked.html', reason=f"Merchant Not Verified: {check_method}",
                              merchant=merchant_input, domain=matched_domain)
     else:
@@ -232,8 +209,7 @@ def verify_otp():
     if user_otp!= data['otp']:
         return render_template('result.html', result="ERROR", final_msg="Invalid OTP")
 
-    risk, reasons = 0, []
-    ml_risk_used = True
+    risk, reasons, ml_risk_used = 0, [], False
     ml_model_name = "Rule-Engine"
     ml_url_used = "ML" in data['check_method']
 
@@ -251,13 +227,38 @@ def verify_otp():
     city_gps = get_city_from_gps(data['lat'], data['lon']) if data['lat']!= 0 else "GPS Disabled"
     current_hour = datetime.datetime.now().hour
 
-    ml_result = predict_fraud_risk(data['amount'], current_hour, dist_from_betul, data['is_approved'])
-    if ml_result[0] is not None:
-        risk = ml_result[0]
-        ml_model_name = ml_result[1]
-        reasons.append(f"ML Analysis: {ml_model_name}")
+    # ML HAMESHA CHALEGA - Whitelist ke saath bhi
+    predict_fraud_risk = get_fraud_model_func()
+    ml_risk = predict_fraud_risk(data['amount'], current_hour, dist_from_betul, data['is_approved'])
+
+    if ml_risk is not None:
+        risk = ml_risk
+        ml_risk_used = True
+        reasons.append("ML Risk Model")
+
+        # Model name decide karo
+        if data['amount'] > 50000:
+            ml_model_name = "XGBoost-ML"
+        elif 23 <= current_hour or current_hour <= 5:
+            ml_model_name = "SVM-ML"
+        else:
+            ml_model_name = "RandomForest-ML"
+
+        # Whitelist hai to prefix jod do
+        if data['is_approved'] and data['amount'] < 50000:
+            ml_model_name = f"Whitelist+{ml_model_name}"
+            risk = int(risk * 0.1) # Whitelist ka discount
     else:
-        ml_model_name = "Rule-Engine"
+        # Fallback rules agar ML fail ho jaye
+        if data['amount'] > 50000:
+            risk += 30
+            reasons.append("Amount > ₹50,000")
+        if dist_from_betul > 2000:
+            risk += 20
+            reasons.append("International Location")
+        if current_hour >= 23 or current_hour <= 5:
+            risk += 25
+            reasons.append("Night Transaction 11PM-5AM")
 
     risk = min(risk, 100)
     result = "BLOCKED" if risk >= 50 else "APPROVED"
@@ -276,7 +277,7 @@ def verify_otp():
         "location": f"{city_gps} {'⚠️' if result=='BLOCKED' else '✅'}",
         "timestamp": str(datetime.datetime.now())[:19],
         "risk_factors": " | ".join(reasons) if reasons else "All checks passed",
-        "ml_risk_used": "Yes 🤖",
+        "ml_risk_used": "Yes 🤖" if ml_risk_used else "No",
         "ml_model_name": ml_model_name,
         "ml_url_used": "Yes 🤖" if ml_url_used else "No",
         "check_method": data['check_method'],
@@ -336,10 +337,5 @@ def admin_logout():
     session.pop('admin', None)
     return redirect('/admin_login')
 
-# ==================== ✅ RAILWAY KE LIYE FINAL CODE =====================
 if __name__ == "__main__":
-    # train_model() # ← Railway pe comment rakho
-    # train_url_model() # ← Railway pe comment rakho
-    print("✅ Models loaded from files!")
-    port = int(os.environ.get('PORT', 8080))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    app.run(debug=True, host='0.0.0.0', port=5000)
