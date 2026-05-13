@@ -24,7 +24,7 @@ url_model = None
 # ========== DEMO USERS - Yaha password set kar sakte ho ==========
 DEMO_USERS = {
     'admin@securepay.com': 'admin123',
-    'user@securepay.com': 'user123'
+    'Vanshikauser65@gmail.com': 'gahcyhlytluunzlz'
 }
 
 def train_model():
@@ -232,3 +232,4 @@ if __name__ == "__main__":
     train_url_model()
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+
