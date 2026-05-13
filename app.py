@@ -7,55 +7,75 @@ import json
 import pandas as pd
 from email.mime.text import MIMEText
 from urllib.parse import urlparse
+import os
 
 app = Flask(__name__)
 app.secret_key = "SecurePay_2026_RBI_Compliant_ML_@#$"
 
-# ==================== 👇 YAHAN 5 JAGAH APNI DETAILS DAAL ====================
+# ==================== CONFIG ====================
 USER_EMAIL = "vanshikauser65@gmail.com"
 USER_PASS = "1234"
 VALID_PIN = "1111"
 ADMIN_USERNAME = "admin"
 ADMIN_PASS = "admin@123"
+BETUL_LAT, BETUL_LONG = 21.9064, 77.9006
 
-# ==================== LAZY LOADING - RAM BACHANE KE LIYE ====================
-MODEL_CACHE = {}
+# ==================== ML MODELS - STARTUP PE LOAD ====================
+print("Starting SecurePay...")
+from ml_model import predict_fraud_risk
+from ml_url_model import predict_url_safe
+print("Models loaded successfully")
 
-def get_fraud_model_func():
-    """Main fraud model function lazy load"""
-    if 'fraud_predict' not in MODEL_CACHE:
-        print("Loading fraud model...")
-        from ml_model import predict_fraud_risk
-        MODEL_CACHE['fraud_predict'] = predict_fraud_risk
-    return MODEL_CACHE['fraud_predict']
-
-def get_url_model_func():
-    """URL safety model lazy load"""
-    if 'url_predict' not in MODEL_CACHE:
-        print("Loading URL model...")
-        from ml_url_model import predict_url_safe
-        MODEL_CACHE['url_predict'] = predict_url_safe
-    return MODEL_CACHE['url_predict']
+def get_city_from_gps(lat, lon):
+    """Location nikal ke city name return karo"""
+    if lat == 0 or lon == 0:
+        return "GPS Disabled"
+    try:
+        url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}"
+        res = requests.get(url, headers={"User-Agent": "SecurePay/1.0"}, timeout=3)
+        data = res.json()
+        city = data.get('address', {}).get('city') or data.get('address', {}).get('town') or data.get('address', {}).get('state')
+        return city if city else "Unknown Location"
+    except:
+        return "Location Fetch Failed"
 
 def send_email_otp(receiver_email, otp):
-    sender_email = "vanshikauser65@gmail.com"
-    app_password = "gahcyhlytluunzlz"
+    """👇 Simple mail - ML ya Location nahi"""
+    sender_email = os.getenv('GMAIL_USER', 'vanshikauser65@gmail.com')
+    app_password = os.getenv('GMAIL_APP_PASS', '').replace(' ', '')
+
+    if not app_password:
+        print("ERROR: GMAIL_APP_PASS not set")
+        return False
+
     try:
-        msg = MIMEText(f"Dear Customer,\n\nYour SecurePay OTP is: {otp}\n\nValid for 2 minutes.\nNever share this OTP with anyone.\n\nRegards,\nSecurePay Security Team")
+        body = f"""Dear Customer,
+
+Your SecurePay OTP is: {otp}
+
+Valid for 2 minutes. Never share this OTP.
+
+Regards,
+SecurePay Team"""
+
+        msg = MIMEText(body)
         msg['Subject'] = "SecurePay - Transaction OTP"
         msg['From'] = f"SecurePay <{sender_email}>"
         msg['To'] = receiver_email
-        server = smtplib.SMTP('smtp.gmail.com', 587)
+
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
         server.starttls()
         server.login(sender_email, app_password)
         server.sendmail(sender_email, receiver_email, msg.as_string())
         server.quit()
+        print(f"OTP Email sent to {receiver_email}")
+        return True
     except Exception as e:
-        print("Email Error:", e)
+        print(f"Email Error: {e}")
+        return False
 
 otp_store = {}
 TRANSACTION_FILE = "transactions.json"
-BETUL_LAT, BETUL_LONG = 21.9064, 77.9006
 
 RBI_APPROVED_MERCHANTS = {
     "amazon.in": ["amazon", "amzn"], "flipkart.com": ["flipkart", "fkrt"],
@@ -87,16 +107,7 @@ def is_rbi_approved_merchant(user_merchant_input):
             return True, official_domain, 0, "Rule-Whitelist"
         if official_domain.startswith('.') and clean_domain.endswith(official_domain):
             return True, clean_domain, 0, "Rule-Whitelist"
-    clean_domain_base = clean_domain.split('.')[0]
-    for official_domain, keywords in RBI_APPROVED_MERCHANTS.items():
-        official_base = official_domain.split('.')[0].replace('.co', '')
-        if clean_domain_base == official_base:
-            return True, official_domain, 0, "Rule-Keyword"
-        for keyword in keywords:
-            if keyword in user_merchant_input.lower():
-                return True, official_domain, 0, "Rule-Keyword"
 
-    predict_url_safe = get_url_model_func()
     ml_safe_score = predict_url_safe(clean_domain)
     if ml_safe_score is not None:
         if ml_safe_score >= 80:
@@ -113,6 +124,30 @@ def haversine(lat1, lon1, lat2, lon2):
     a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
     return R * 2 * atan2(sqrt(a), sqrt(1-a))
 
+def run_ml_analysis(amount, lat, lon, is_approved):
+    """ML Algorithm auto select - RandomForest/XGBoost/SVM"""
+    current_hour = datetime.datetime.now().hour
+    dist_from_betul = haversine(BETUL_LAT, BETUL_LONG, lat, lon) if lat!= 0 else 0
+
+    ml_risk = predict_fraud_risk(amount, current_hour, dist_from_betul, is_approved)
+
+    if ml_risk is None:
+        return 5, "Rule-Engine"
+
+    # Algorithm auto select
+    if amount > 50000:
+        ml_model_name = "XGBoost-ML"
+    elif 23 <= current_hour or current_hour <= 5:
+        ml_model_name = "SVM-ML"
+    else:
+        ml_model_name = "RandomForest-ML"
+
+    if is_approved and amount < 50000:
+        ml_model_name = f"Whitelist+{ml_model_name}"
+        ml_risk = int(ml_risk * 0.1)
+
+    return ml_risk, ml_model_name
+
 def save_transaction(data):
     try:
         with open(TRANSACTION_FILE, 'r') as f:
@@ -122,24 +157,6 @@ def save_transaction(data):
     transactions.append(data)
     with open(TRANSACTION_FILE, 'w') as f:
         json.dump(transactions, f, indent=4)
-
-def get_city_from_gps(lat, lon):
-    try:
-        res = requests.get(f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json",
-                          headers={'User-Agent': 'SecurePay-RBI-Compliant/1.0'}, timeout=5)
-        data = res.json()
-        address = data.get('address', {})
-        city = address.get('city') or address.get('town') or address.get('village') or address.get('state')
-        return f"{city}, {address.get('country')}" if city else "India"
-    except:
-        return "Location Unavailable"
-
-def get_all_transactions():
-    try:
-        with open(TRANSACTION_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return []
 
 @app.route('/', methods=['GET', 'POST'])
 def login():
@@ -166,15 +183,25 @@ def check_site():
     merchant_input = request.form.get('merchant_url')
     lat = float(request.form.get('lat', 0)) if request.form.get('lat') else 0
     lon = float(request.form.get('lon', 0)) if request.form.get('lon') else 0
+
     is_approved, matched_domain, merchant_risk, check_method = is_rbi_approved_merchant(merchant_input)
+
+    # ML + Location nikal lo but mail/OTP me use nahi karenge
+    ml_risk_score, ml_model_name = run_ml_analysis(amount, lat, lon, is_approved)
+    city = get_city_from_gps(lat, lon)
+
     session['txn_details'] = {
         "card": card, "pin": pin, "amount": amount, "merchant_input": merchant_input,
-        "merchant_domain": matched_domain, "lat": lat, "lon": lon,
-        "is_approved": is_approved, "check_method": check_method, "merchant_risk": merchant_risk
+        "merchant_domain": matched_domain, "lat": lat, "lon": lon, "city": city,
+        "is_approved": is_approved, "check_method": check_method,
+        "merchant_risk": merchant_risk, "ml_risk_score": ml_risk_score,
+        "ml_model_name": ml_model_name
     }
+
     if not is_approved or merchant_risk >= 60:
         return render_template('blocked.html', reason=f"Merchant Not Verified: {check_method}",
-                             merchant=merchant_input, domain=matched_domain)
+                             merchant=merchant_input, domain=matched_domain,
+                             ml_model_name=ml_model_name, risk_score=ml_risk_score, city=city)
     else:
         return redirect('/user_approve')
 
@@ -183,19 +210,27 @@ def user_approve():
     if 'user' not in session or 'txn_details' not in session:
         return redirect('/')
     data = session['txn_details']
+
     if request.method == 'POST':
         if request.form.get('action') == 'approve':
             email = session['user']
             otp = str(random.randint(1000, 9999))
             otp_store[email] = {"otp": otp, "time": datetime.datetime.now(), **data}
+
+            # 👇 Simple mail - ML/Location nahi
             send_email_otp(email, otp)
+
+            # 👇 OTP page pe bhi ML/Location nahi bhejenge
             return render_template('otp.html', amount=data['amount'],
                                  merchant=data['merchant_input'], domain=data['merchant_domain'])
         else:
             return render_template('result.html', result="CANCELLED", final_msg="Transaction Cancelled by User")
+
+    # 👇 Approve page pe ML + Location dikhega
     return render_template('approve.html', amount=data['amount'],
                          merchant=data['merchant_input'], domain=data['merchant_domain'],
-                         check_method=data['check_method'])
+                         ml_model_name=data['ml_model_name'],
+                         risk_score=data['ml_risk_score'], city=data['city'])
 
 @app.route('/verify_otp', methods=['POST'])
 def verify_otp():
@@ -209,9 +244,8 @@ def verify_otp():
     if user_otp!= data['otp']:
         return render_template('result.html', result="ERROR", final_msg="Invalid OTP")
 
-    risk, reasons, ml_risk_used = 0, [], False
-    ml_model_name = "Rule-Engine"
-    ml_url_used = "ML" in data['check_method']
+    risk = data['ml_risk_score']
+    reasons = [f"AI Model: {data['ml_model_name']}"]
 
     if len(data['card'])!= 16 or not data['card'].isdigit():
         risk += 40
@@ -219,69 +253,28 @@ def verify_otp():
     if data['pin']!= VALID_PIN:
         risk += 40
         reasons.append("Incorrect PIN")
-    risk += data['merchant_risk']
-    if data['merchant_risk'] == 60:
-        reasons.append(f"Merchant Issue: {data['check_method']}")
-
-    dist_from_betul = haversine(BETUL_LAT, BETUL_LONG, data['lat'], data['lon']) if data['lat']!= 0 else 0
-    city_gps = get_city_from_gps(data['lat'], data['lon']) if data['lat']!= 0 else "GPS Disabled"
-    current_hour = datetime.datetime.now().hour
-
-    # ML HAMESHA CHALEGA - Whitelist ke saath bhi
-    predict_fraud_risk = get_fraud_model_func()
-    ml_risk = predict_fraud_risk(data['amount'], current_hour, dist_from_betul, data['is_approved'])
-
-    if ml_risk is not None:
-        risk = ml_risk
-        ml_risk_used = True
-        reasons.append("ML Risk Model")
-
-        # Model name decide karo
-        if data['amount'] > 50000:
-            ml_model_name = "XGBoost-ML"
-        elif 23 <= current_hour or current_hour <= 5:
-            ml_model_name = "SVM-ML"
-        else:
-            ml_model_name = "RandomForest-ML"
-
-        # Whitelist hai to prefix jod do
-        if data['is_approved'] and data['amount'] < 50000:
-            ml_model_name = f"Whitelist+{ml_model_name}"
-            risk = int(risk * 0.1) # Whitelist ka discount
-    else:
-        # Fallback rules agar ML fail ho jaye
-        if data['amount'] > 50000:
-            risk += 30
-            reasons.append("Amount > ₹50,000")
-        if dist_from_betul > 2000:
-            risk += 20
-            reasons.append("International Location")
-        if current_hour >= 23 or current_hour <= 5:
-            risk += 25
-            reasons.append("Night Transaction 11PM-5AM")
 
     risk = min(risk, 100)
     result = "BLOCKED" if risk >= 50 else "APPROVED"
-    final_msg = "Transaction Blocked by Security Protocol" if result == "BLOCKED" else "Transaction Approved"
+    final_msg = "Transaction Blocked by AI Security" if result == "BLOCKED" else "Transaction Approved by AI"
 
     trans_data = {
         "transaction_id": f"TXN{random.randint(100000,999999)}",
         "email": email,
         "card_masked": "**** **** **** " + data['card'][-4:],
-        "amount": data['amount'],
+        "amount": data['amount"],
         "merchant_input": data['merchant_input'],
         "merchant_verified": data['merchant_domain'],
         "rbi_approved": data['is_approved'],
         "risk_score": risk,
         "result": result,
-        "location": f"{city_gps} {'⚠️' if result=='BLOCKED' else '✅'}",
+        "location": f"{data['city']} {'✅' if result=='APPROVED' else '⚠️'}", # 👇 Result me Location
         "timestamp": str(datetime.datetime.now())[:19],
-        "risk_factors": " | ".join(reasons) if reasons else "All checks passed",
-        "ml_risk_used": "Yes 🤖" if ml_risk_used else "No",
-        "ml_model_name": ml_model_name,
-        "ml_url_used": "Yes 🤖" if ml_url_used else "No",
-        "check_method": data['check_method'],
-        "distance_from_base_km": round(dist_from_betul, 2),
+        "risk_factors": " | ".join(reasons),
+        "ml_risk_used": "Yes 🤖",
+        "ml_model_name": data['ml_model_name'], # 👇 Result me ML
+        "check_method": data['ml_model_name'],
+        "distance_from_base_km": round(haversine(BETUL_LAT, BETUL_LONG, data['lat'], data['lon']), 2) if data['lat']!= 0 else 0,
         "gps_coordinates": f"{data['lat']}, {data['lon']}"
     }
     save_transaction(trans_data)
@@ -298,39 +291,28 @@ def logout():
 @app.route('/admin_login', methods=['GET', 'POST'])
 def admin_login():
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-        if username == ADMIN_USERNAME and password == ADMIN_PASS:
-            session['admin'] = username
+        if request.form.get('username') == ADMIN_USERNAME and request.form.get('password') == ADMIN_PASS:
+            session['admin'] = request.form.get('username')
             return redirect('/admin')
-        else:
-            return render_template('admin_login.html', error="Invalid Username or Password")
+        return render_template('admin_login.html', error="Invalid Credentials")
     return render_template('admin_login.html')
 
 @app.route('/admin')
 def admin():
     if 'admin' not in session:
         return redirect('/admin_login')
-    transactions = get_all_transactions()
+    try:
+        with open(TRANSACTION_FILE, 'r') as f:
+            transactions = json.load(f)
+    except:
+        transactions = []
     total = len(transactions)
     approved = len([t for t in transactions if t['result'] == 'APPROVED'])
     blocked = len([t for t in transactions if t['result'] == 'BLOCKED'])
     total_amount = sum([t['amount'] for t in transactions if t['result'] == 'APPROVED'])
-
-    risk_low = len([t for t in transactions if t['risk_score'] <= 25])
-    risk_medium = len([t for t in transactions if 25 < t['risk_score'] <= 50])
-    risk_high = len([t for t in transactions if 50 < t['risk_score'] <= 75])
-    risk_critical = len([t for t in transactions if t['risk_score'] > 75])
-
-    risk_data = {
-        'low': risk_low, 'medium': risk_medium,
-        'high': risk_high, 'critical': risk_critical
-    }
-
     return render_template('admin.html', transactions=transactions[-50:],
                          total=total, approved=approved, blocked=blocked,
-                         total_amount=total_amount, admin=session['admin'],
-                         risk_data=json.dumps(risk_data))
+                         total_amount=total_amount, admin=session['admin'])
 
 @app.route('/admin_logout')
 def admin_logout():
