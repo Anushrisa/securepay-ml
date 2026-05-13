@@ -33,6 +33,8 @@ BLACKLISTED_DOMAINS = [
 ]
 
 def extract_domain(user_input):
+    if not user_input:
+        return""
     clean_input = user_input.strip().lower()
     clean_input = clean_input.replace("https://", "").replace("http://", "")
     clean_input = clean_input.split('/')[0]
@@ -133,9 +135,11 @@ def check_site():
     if 'user' not in session:
         return redirect('/')
 
-    merchant_input = request.form.get('merchant')
-    amount = float(request.form.get('amount'))
+    merchant_input = request.form.get('merchant',' ')
+    amount = float(request.form.get('amount', 0))
 
+    if not merchant_input:
+        return render_templates('result.html', result="ERROR", final_msg="MERCHANT name cannot be empty")
     is_approved, merchant_domain, ml_risk, ml_model_name = is_rbi_approved_merchant(merchant_input)
     city, lat, lon = get_location()
 
