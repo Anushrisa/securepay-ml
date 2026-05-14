@@ -2,7 +2,6 @@ from flask import Flask, request, render_template, redirect, session
 import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -10,86 +9,95 @@ import random
 import os
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = "securepay-mail-only-2024"
 
 # ========== CONFIG ==========
 SMTP_EMAIL = "Vanshikauser65@gmail.com"
-SMTP_PASSWORD = "djdaihesjsddahzs" # Apna App Password daalo
+SMTP_PASSWORD = "djdaihesjsddahzs" # ⚠️ GMAIL APP PASSWORD ZARURI HAI
 
-# ========== DEMO USERS ==========
 DEMO_USERS = {
     'admin@securepay.com': 'admin123',
     'user@securepay.com': 'user123',
-    'Vanshikauser65@gmail.com': 'user123' # Apni ID
+    'vanshikauser65@gmail.com': 'user123'
 }
 
 # ========== ML MODELS ==========
-ml_model = None
-url_model = None
+ml_model = RandomForestClassifier(n_estimators=50, random_state=42)
+url_model = RandomForestClassifier(n_estimators=20, random_state=42)
 
-def train_model():
-    global ml_model
-    data = {
-        'amount': [500, 5000, 25000, 1000, 75000, 200, 15000, 45000, 8000, 120000],
-        'hour': [10, 22, 3, 14, 1, 9, 23, 2, 16, 4],
-        'location_risk': [1, 3, 8, 2, 9, 1, 7, 8, 3, 10],
-        'frequency': [5, 2, 1, 4, 1, 6, 2, 1, 3, 1],
-        'fraud': [0, 0, 1, 0, 1, 0, 1, 1, 0, 1]
-    }
-    df = pd.DataFrame(data)
-    X = df[['amount', 'hour', 'location_risk', 'frequency']]
-    y = df['fraud']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    ml_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    ml_model.fit(X_train, y_train)
-    print("✅ ML Model Trained")
+try:
+    X = np.array([[500,10,1,5],[5000,22,3,2],[25000,3,8,1],[1000,14,2,4]])
+    y = np.array([0,0,1])
+    ml_model.fit(X, y)
+    X_url = np.array([[1,10,0],[0,25,1],[1,8,0],[0,30,1]])
+    y_url = np.array([0,1,0,1])
+    url_model.fit(X_url, y_url)
+except: pass
 
-def train_url_model():
-    global url_model
-    data = {
-        'has_https': [1, 0, 1, 0, 1, 0],
-        'domain_length': [10, 25, 8, 30, 12, 35],
-        'has_ip': [0, 1, 0, 1, 0, 1],
-        'suspicious': [0, 1, 0, 1, 0, 1]
-    }
-    df = pd.DataFrame(data)
-    X = df[['has_https', 'domain_length', 'has_ip']]
-    y = df['suspicious']
-    url_model = RandomForestClassifier(n_estimators=50, random_state=42)
-    url_model.fit(X, y)
-    print("✅ URL Model Trained")
+def get_risk(amount, hour, lat, lon, merchant):
+    try:
+        loc_risk = 2 if abs(lat-28.61)<1 and abs(lon-77.20)<1 else 8
+        features = np.array([[amount, hour, loc_risk, 3]])
+        risk = int(ml_model.predict_proba(features)[0][1] * 100)
+        https = 1 if str(merchant).startswith('https') else 0
+        length = min(len(str(merchant)), 50)
+        has_ip = 1 if any(c.isdigit() for c in str(merchant).split('.')[0]) else 0
+        url_feat = np.array([[https, length, has_ip]])
+        url_risk = int(url_model.predict_proba(url_feat)[0][1] * 100)
+        return int((risk + url_risk) / 2)
+    except:
+        return 45
 
-def get_location_risk(lat, lon):
-    safe_zones = [(28.6139, 77.2090), (19.0760, 72.8777), (12.9716, 77.5946)]
-    for safe_lat, safe_lon in safe_zones:
-        if abs(lat - safe_lat) < 1 and abs(lon - safe_lon) < 1:
-            return 2
-    return 8
+# ========== OTP MAIL - FAIL = ERROR ==========
+def send_otp_mail_strict(to_email, otp, amount, merchant):
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = to_email
+        msg['Subject'] = f"SecurePay OTP: {otp}"
+        html = f"""
+        <div style="font-family:Arial;padding:20px;max-width:400px;">
+        <h2 style="color:#1976d2;">SecurePay Transaction OTP</h2>
+        <h1 style="color:#007bff;font-size:36px;letter-spacing:8px;margin:20px 0;">{otp}</h1>
+        <p><b>Amount:</b> ₹{amount}</p>
+        <p><b>Merchant:</b> {merchant}</p>
+        <p style="color:#d32f2f;font-size:12px;">Valid for 5 minutes. Do not share with anyone.</p>
+        </div>
+        """
+        msg.attach(MIMEText(html, 'html'))
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+        server.starttls()
+        server.login(SMTP_EMAIL, SMTP_PASSWORD)
+        server.send_message(msg)
+        server.quit()
+        return True, "Success"
+    except smtplib.SMTPAuthenticationError:
+        return False, "Gmail App Password galat hai. 2-Step Verification ON karke App Password banao."
+    except Exception as e:
+        return False, f"Mail server error: Gmail se connect nahi ho pa raha. Check internet ya App Password."
 
-def get_url_risk(domain):
-    https = 1 if domain.startswith('https') else 0
-    length = len(domain)
-    has_ip = 1 if any(char.isdigit() for char in domain.split('.')[0]) else 0
-    features = np.array([[https, length, has_ip]])
-    risk = url_model.predict_proba(features)[0][1] * 100
-    return int(risk)
+# ========== ERROR HANDLER ==========
+@app.errorhandler(Exception)
+@app.errorhandler(404)
+@app.errorhandler(500)
+def handle_error(e):
+    if 'user' in session: return redirect('/dashboard')
+    return redirect('/')
 
 # ========== ROUTES ==========
 @app.route('/')
 def home():
-    if 'user' in session:
-        return redirect('/dashboard')
-    return render_template('login.html')
+    return redirect('/dashboard') if 'user' in session else render_template('login.html')
 
-@app.route('/login', methods=['POST'])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    email = request.form['email'].lower()
-    password = request.form['password']
+    if request.method == 'GET': return render_template('login.html')
+    email = request.form.get('email', '').lower().strip()
+    password = request.form.get('password', '').strip()
     if DEMO_USERS.get(email) == password:
         session['user'] = email
-        print(f"LOGIN TRY: {email} | {password}")
+        session.permanent = True
         return redirect('/dashboard')
-    print(f"LOGIN TRY: {email} | {password}")
     return render_template('login.html', error="Invalid credentials")
 
 @app.route('/dashboard')
@@ -105,98 +113,52 @@ def logout():
 @app.route('/approve', methods=['POST'])
 def approve():
     if 'user' not in session: return redirect('/')
-
-    amount = float(request.form['amount'])
-    merchant = request.form['merchant']
-    card = request.form['card']
-    lat = float(request.form['lat'])
-    lon = float(request.form['lon'])
-
     try:
-        # ML Prediction
+        amount = float(request.form.get('amount', 5000))
+        merchant = request.form.get('merchant', 'https://amazon.in')
+        card = request.form.get('card', '4111111111111111')[-4:]
+        lat = float(request.form.get('lat', 28.61))
+        lon = float(request.form.get('lon', 77.20))
         hour = pd.Timestamp.now().hour
-        loc_risk = get_location_risk(lat, lon)
-        freq = 3 # dummy
-        features = np.array([[amount, hour, loc_risk, freq]])
-        risk_score = int(ml_model.predict_proba(features)[0][1] * 100)
-        url_risk = get_url_risk(merchant)
-        final_risk = int((risk_score + url_risk) / 2)
-
-    except Exception as e:
-        print(f"ML Error: {e}")
-        final_risk = 50 # fallback
-
-    txn_details = {
-        'amount': amount,
-        'merchant_domain': merchant,
-        'card': card,
-        'lat': lat,
-        'lon': lon,
-        'risk_score': final_risk,
-        'rbi_status': '✅ RBI APPROVED' if final_risk < 60 else '❌ RBI FLAGGED'
-    }
-    session['txn_details'] = txn_details
-    return render_template('approve.html', txn=txn_details)
+        final_risk = get_risk(amount, hour, lat, lon, merchant)
+        session['txn_details'] = {
+            'amount': amount, 'merchant_domain': merchant, 'card': card,
+            'risk_score': final_risk,
+            'rbi_status': '✅ RBI APPROVED' if final_risk < 60 else '❌ RBI FLAGGED'
+        }
+        return render_template('approve.html', txn=session['txn_details'])
+    except: return redirect('/dashboard')
 
 @app.route('/send_otp', methods=['POST'])
 def send_otp():
     if 'user' not in session or 'txn_details' not in session: return redirect('/')
-
-    action = request.form.get('action', '')
-    if action == 'cancel':
+    if request.form.get('action') == 'cancel':
         session.pop('txn_details', None)
         return render_template('result.html', result="BLOCKED", final_msg="Transaction Cancelled")
 
     otp = str(random.randint(100000, 999999))
-    session['otp'] = otp
     txn = session['txn_details']
 
-    # 👇 DEMO KE LIYE OTP LOGS ME PRINT KARO
-    print(f"✅✅✅ DEMO OTP: {otp} for {session['user']}")
+    # MAIL BHEJO - FAIL HUA TO YAHI RUK JAO, OTP PAGE PE MAT JAO
+    success, error_msg = send_otp_mail_strict(session['user'], otp, txn['amount'], txn['merchant_domain'])
 
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = SMTP_EMAIL
-        msg['To'] = session['user']
-        msg['Subject'] = f"SecurePay OTP: {otp}"
-
-        body = f"""
-        <html><body>
-        <h2>🏦 SecurePay</h2>
-        <h1 style="color:#1e3c72;">Your OTP: {otp}</h1>
-        <p><b>Amount:</b> ₹{txn['amount']}</p>
-        <p><b>Merchant:</b> {txn['merchant_domain']}</p>
-        </body></html>
-        """
-        msg.attach(MIMEText(body, 'html'))
-
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
-        server.starttls()
-        server.login(SMTP_EMAIL, SMTP_PASSWORD)
-        server.send_message(msg)
-        server.quit()
-        print(f"✅ OTP {otp} sent to {session['user']}")
-
-    except Exception as e:
-        print(f"❌ OTP Error: {e} | Using console OTP instead")
-
-    return render_template('otp.html', email=session['user'], amount=txn['amount'])
+    if success:
+        session['otp'] = otp
+        return render_template('otp.html', email=session['user'], amount=txn['amount'])
+    else:
+        # Mail fail = Error dikhao, OTP save mat karo
+        return render_template('approve.html', txn=txn, error=f"OTP nahi bhej paaye: {error_msg}")
 
 @app.route('/verify', methods=['POST'])
 def verify():
-    if 'user' not in session or 'otp' not in session: return redirect('/')
-
-    user_otp = request.form['otp']
-    if user_otp == session['otp']:
+    if 'user' not in session: return redirect('/')
+    if 'otp' not in session or 'txn_details' not in session: return redirect('/dashboard')
+    if request.form.get('otp', '').strip() == session.get('otp', ''):
+        txn = session.pop('txn_details', {})
         session.pop('otp', None)
-        txn = session.pop('txn_details', None)
         return render_template('success.html', txn=txn)
     else:
         return render_template('otp.html', email=session['user'], amount=session['txn_details']['amount'], error="Invalid OTP")
-
-# ========== GUNICORN FIX ==========
-train_model()
-train_url_model()
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
