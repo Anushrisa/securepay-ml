@@ -9,11 +9,11 @@ import random
 import os
 
 app = Flask(__name__)
-app.secret_key = "securepay-mail-only-2024"
+app.secret_key = "securepay-final-2024"
 
 # ========== CONFIG ==========
 SMTP_EMAIL = "Vanshikauser65@gmail.com"
-SMTP_PASSWORD = "djdaihesjsddahzs" # ⚠️ GMAIL APP PASSWORD ZARURI HAI
+SMTP_PASSWORD = "djdaihesjsddahzs" # Gmail App Password
 
 DEMO_USERS = {
     'admin@securepay.com': 'admin123',
@@ -29,6 +29,7 @@ try:
     X = np.array([[500,10,1,5],[5000,22,3,2],[25000,3,8,1],[1000,14,2,4]])
     y = np.array([0,0,1])
     ml_model.fit(X, y)
+
     X_url = np.array([[1,10,0],[0,25,1],[1,8,0],[0,30,1]])
     y_url = np.array([0,1,0,1])
     url_model.fit(X_url, y_url)
@@ -39,6 +40,7 @@ def get_risk(amount, hour, lat, lon, merchant):
         loc_risk = 2 if abs(lat-28.61)<1 and abs(lon-77.20)<1 else 8
         features = np.array([[amount, hour, loc_risk, 3]])
         risk = int(ml_model.predict_proba(features)[0][1] * 100)
+
         https = 1 if str(merchant).startswith('https') else 0
         length = min(len(str(merchant)), 50)
         has_ip = 1 if any(c.isdigit() for c in str(merchant).split('.')[0]) else 0
@@ -48,33 +50,23 @@ def get_risk(amount, hour, lat, lon, merchant):
     except:
         return 45
 
-# ========== OTP MAIL - FAIL = ERROR ==========
-def send_otp_mail_strict(to_email, otp, amount, merchant):
+def send_otp_safe(to_email, otp, amount, merchant):
+    print(f"🔐 OTP FOR {to_email}: {otp} | Amount: ₹{amount}")
     try:
         msg = MIMEMultipart()
         msg['From'] = SMTP_EMAIL
         msg['To'] = to_email
         msg['Subject'] = f"SecurePay OTP: {otp}"
-        html = f"""
-        <div style="font-family:Arial;padding:20px;max-width:400px;">
-        <h2 style="color:#1976d2;">SecurePay Transaction OTP</h2>
-        <h1 style="color:#007bff;font-size:36px;letter-spacing:8px;margin:20px 0;">{otp}</h1>
-        <p><b>Amount:</b> ₹{amount}</p>
-        <p><b>Merchant:</b> {merchant}</p>
-        <p style="color:#d32f2f;font-size:12px;">Valid for 5 minutes. Do not share with anyone.</p>
-        </div>
-        """
+        html = f"<div style='font-family:Arial;'><h2>SecurePay OTP</h2><h1 style='color:#007bff;'>{otp}</h1><p>Amount: ₹{amount}</p><p>Merchant: {merchant}</p></div>"
         msg.attach(MIMEText(html, 'html'))
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=6)
         server.starttls()
         server.login(SMTP_EMAIL, SMTP_PASSWORD)
         server.send_message(msg)
         server.quit()
-        return True, "Success"
-    except smtplib.SMTPAuthenticationError:
-        return False, "Gmail App Password galat hai. 2-Step Verification ON karke App Password banao."
-    except Exception as e:
-        return False, f"Mail server error: Gmail se connect nahi ho pa raha. Check internet ya App Password."
+        return "OTP sent to your Gmail"
+    except:
+        return "Mail delayed. Use OTP from Railway Deploy Logs"
 
 # ========== ERROR HANDLER ==========
 @app.errorhandler(Exception)
@@ -119,8 +111,10 @@ def approve():
         card = request.form.get('card', '4111111111111111')[-4:]
         lat = float(request.form.get('lat', 28.61))
         lon = float(request.form.get('lon', 77.20))
+
         hour = pd.Timestamp.now().hour
         final_risk = get_risk(amount, hour, lat, lon, merchant)
+
         session['txn_details'] = {
             'amount': amount, 'merchant_domain': merchant, 'card': card,
             'risk_score': final_risk,
@@ -137,17 +131,10 @@ def send_otp():
         return render_template('result.html', result="BLOCKED", final_msg="Transaction Cancelled")
 
     otp = str(random.randint(100000, 999999))
+    session['otp'] = otp
     txn = session['txn_details']
-
-    # MAIL BHEJO - FAIL HUA TO YAHI RUK JAO, OTP PAGE PE MAT JAO
-    success, error_msg = send_otp_mail_strict(session['user'], otp, txn['amount'], txn['merchant_domain'])
-
-    if success:
-        session['otp'] = otp
-        return render_template('otp.html', email=session['user'], amount=txn['amount'])
-    else:
-        # Mail fail = Error dikhao, OTP save mat karo
-        return render_template('approve.html', txn=txn, error=f"OTP nahi bhej paaye: {error_msg}")
+    mail_status = send_otp_safe(session['user'], otp, txn['amount'], txn['merchant_domain'])
+    return render_template('otp.html', email=session['user'], amount=txn['amount'], mail_status=mail_status)
 
 @app.route('/verify', methods=['POST'])
 def verify():
@@ -158,7 +145,7 @@ def verify():
         session.pop('otp', None)
         return render_template('success.html', txn=txn)
     else:
-        return render_template('otp.html', email=session['user'], amount=session['txn_details']['amount'], error="Invalid OTP")
+        return render_template('otp.html', email=session['user'], amount=session['txn_details']['amount'], error="Invalid OTP", mail_status="Check Railway Deploy Logs")
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
