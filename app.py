@@ -7,7 +7,9 @@ import os
 app = Flask(__name__)
 app.secret_key = "vanshika-secure-2024"
 
-# Common CSS for banking look
+SMTP_EMAIL = "vanshikauser65@gmail.com"
+SMTP_PASSWORD = "gahcyhlytluunzlz"
+
 STYLE = """
 <style>
 body{font-family:Arial,sans-serif;background:#f0f2f5;margin:0;padding:0}
@@ -43,8 +45,8 @@ def home():
 
 @app.route('/login', methods=['POST'])
 def login():
-    if request.form['email'] == "vanshikauser65@gmail.com" and request.form['password'] == "user123":
-        session['user'] = "vanshikauser65@gmail.com"
+    if request.form['email'] == SMTP_EMAIL and request.form['password'] == "user123":
+        session['user'] = SMTP_EMAIL
         return redirect('/dashboard')
     return f'{STYLE}<div class="container"><div class="error">Wrong Login</div><a href="/">Try Again</a></div>'
 
@@ -58,7 +60,7 @@ def dashboard():
             <h2>SecurePay Dashboard <a href="/logout" class="logout">Logout</a></h2>
         </div>
         <div class="card">
-            <b>Welcome:</b> vanshikauser65@gmail.com<br>
+            <b>Welcome:</b> {SMTP_EMAIL}<br>
             <b>Account Status:</b> ✅ Active
         </div>
         <h3>Make Payment</h3>
@@ -101,11 +103,12 @@ def pay():
         </div>
         """, 'html')
         msg['Subject'] = f"SecurePay OTP: {otp}"
-        msg['From'] = "vanshikauser65@gmail.com"
-        msg['To'] = "vanshikauser65@gmail.com"
-        s = smtplib.SMTP('smtp.gmail.com', 587)
-        s.starttls()
-        s.login("vanshikauser65@gmail.com", "gahcyhlytluunzlz")
+        msg['From'] = SMTP_EMAIL
+        msg['To'] = SMTP_EMAIL
+        
+        # YAHI MAIN FIX HAI - SMTP_SSL + 465 + NO starttls()
+        s = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
+        s.login(SMTP_EMAIL, SMTP_PASSWORD)
         s.send_message(msg)
         s.quit()
         
@@ -118,7 +121,7 @@ def pay():
                 <b>Merchant:</b> {merchant}<br>
                 <b>Card:</b> **** **** **** {card}
             </div>
-            <p>OTP sent to vanshikauser65@gmail.com</p>
+            <p>OTP sent to {SMTP_EMAIL}</p>
             <form action="/verify" method="POST">
             <input name="otp" placeholder="Enter 6-digit OTP" maxlength="6" required>
             <button>Verify & Pay</button>
