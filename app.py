@@ -1,93 +1,78 @@
 from flask import Flask, request, render_template, redirect, session
-import pandas as pd
-import numpy as np
-from sklearn.ensemble import RandomForestClassifier
 import smtplib
 from email.mime.text import MIMEText
 import random
 import os
 
 app = Flask(__name__)
-app.secret_key = "only-vanshika-2024"
-
-SMTP_EMAIL = "Vanshikauser65@gmail.com"
-SMTP_PASSWORD = "djdaihesjsddahzs" # App Password
-
-# SIRF TUMHARA ACCOUNT
-USER_EMAIL = "vanshikauser65@gmail.com"
-USER_PASSWORD = "user123"
-
-ml_model = RandomForestClassifier()
-ml_model.fit([[500,10,1,5],[5000,22,3,2]], [0,0])
+app.secret_key = "vanshika123"
 
 @app.route('/')
 def home():
-    if 'user' in session: return redirect('/dashboard')
-    return render_template('login.html')
+    if 'user' in session:
+        return redirect('/dashboard')
+    return '''
+    <h2>Login</h2>
+    <form action="/login" method="POST">
+    Email: <input name="email" value="vanshikauser65@gmail.com"><br><br>
+    Password: <input name="password" value="user123"><br><br>
+    <button>Login</button>
+    </form>
+    '''
 
 @app.route('/login', methods=['POST'])
 def login():
-    email = request.form.get('email','').lower().strip()
-    password = request.form.get('password','').strip()
-    if email == USER_EMAIL and password == USER_PASSWORD:
-        session['user'] = email
+    if request.form['email'] == "vanshikauser65@gmail.com" and request.form['password'] == "user123":
+        session['user'] = "vanshikauser65@gmail.com"
         return redirect('/dashboard')
-    return render_template('login.html', error="Only vanshikauser65@gmail.com allowed")
+    return "Wrong Login"
 
 @app.route('/dashboard')
 def dashboard():
     if 'user' not in session: return redirect('/')
-    return render_template('dashboard.html')
+    return '''
+    <h2>Welcome vanshikauser65@gmail.com</h2>
+    <form action="/pay" method="POST">
+    Amount: <input name="amount" value="5000"><br><br>
+    <button>Pay Now</button>
+    </form>
+    '''
 
-@app.route('/approve', methods=['POST'])
-def approve():
+@app.route('/pay', methods=['POST'])
+def pay():
     if 'user' not in session: return redirect('/')
-    try:
-        amount = float(request.form['amount'])
-        merchant = request.form['merchant']
-        card = request.form['card']
-        lat = float(request.form['lat'])
-        lon = float(request.form['lon'])
-        risk = int(ml_model.predict_proba([[amount, 14, 2, 3]])[0][1] * 100)
-
-        session['txn'] = {
-            'amount': amount, 'merchant': merchant, 'card': card[-4:],
-            'risk': risk, 'status': '✅ APPROVED' if risk < 60 else '❌ FLAGGED'
-        }
-        return render_template('approve.html', txn=session['txn'])
-    except Exception as e:
-        return f"Error: {e}"
-
-@app.route('/send_otp', methods=['POST'])
-def send_otp():
-    if 'txn' not in session: return redirect('/dashboard')
-    if request.form.get('action') == 'cancel':
-        return "Transaction Cancelled"
-
+    amount = request.form['amount']
     otp = str(random.randint(100000, 999999))
     session['otp'] = otp
-
+    session['amount'] = amount
+    
     try:
-        msg = MIMEText(f"Your SecurePay OTP is: {otp}")
-        msg['Subject'] = f"SecurePay OTP: {otp}"
-        msg['From'] = SMTP_EMAIL
-        msg['To'] = session['user']
+        msg = MIMEText(f"Your OTP is: {otp}")
+        msg['Subject'] = f"OTP: {otp}"
+        msg['From'] = "Vanshikauser65@gmail.com"
+        msg['To'] = "vanshikauser65@gmail.com"
         s = smtplib.SMTP('smtp.gmail.com', 587)
         s.starttls()
-        s.login(SMTP_EMAIL, SMTP_PASSWORD)
+        s.login("Vanshikauser65@gmail.com", "gahcyhlytluunzlz")
         s.send_message(msg)
         s.quit()
-        return render_template('otp.html', email=session['user'])
+        return f'''
+        <h3>OTP sent to mail</h3>
+        <p>Amount: ₹{amount}</p>
+        <form action="/verify" method="POST">
+        <input name="otp" placeholder="Enter OTP"><br>
+        <button>Verify</button>
+        </form>
+        '''
     except Exception as e:
-        return render_template('approve.html', txn=session['txn'], error=f"Mail Failed: {e}")
+        return f"Mail Error: {e}"
 
 @app.route('/verify', methods=['POST'])
 def verify():
-    if request.form.get('otp') == session.get('otp'):
-        txn = session.pop('txn')
-        session.pop('otp')
-        return f"<h1>✅ Success! ₹{txn['amount']} Paid to {txn['merchant']}</h1><a href='/dashboard'>New Transaction</a>"
-    return render_template('otp.html', email=session['user'], error="Wrong OTP")
+    if request.form['otp'] == session.get('otp'):
+        amt = session.get('amount')
+        return f"<h1>✅ Payment Success! ₹{amt} Paid</h1><a href='/dashboard'>Back</a>"
+    return "Wrong OTP"
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
