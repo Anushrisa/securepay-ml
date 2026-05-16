@@ -3,6 +3,7 @@ import random
 import os
 import urllib.request
 import json
+import re
 
 app = Flask(__name__)
 app.secret_key = "vanshika-secure-2024"
@@ -27,11 +28,49 @@ button:hover{background:#2e7d32}
 table{width:100%;border-collapse:collapse;margin:15px 0}
 td{padding:8px;border-bottom:1px solid #eee}
 .badge{background:#43a047;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
+.badge-danger{background:#c62828;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
 .success{color:#2e7d32;background:#e8f5e9;padding:15px;border-radius:8px;text-align:center}
 .error{color:#c62828;background:#ffebee;padding:12px;border-radius:6px;margin:10px 0}
 .flex{display:flex;gap:10px}
+.block-alert{background:#ffcdd2;border:2px solid #c62828;padding:20px;border-radius:8px;text-align:center}
+.block-alert h2{color:#b71c1c;margin:0 0 10px 0}
 </style>
 """
+
+# ✅ NAYA: FRAUD LINK CHECKER FUNCTION
+def check_fraud_link(text):
+    if not text:
+        return False, "Empty merchant"
+    
+    text_lower = text.lower()
+    
+    # 1. Suspicious keywords check
+    suspicious_words = [
+        'free', 'lottery', 'prize', 'winner', 'kyc', 'verify', 'urgent', 
+        'suspended', 'blocked', 'gift', 'reward', 'bonus', 'claim',
+        'bit.ly', 'tinyurl', 'cutt.ly', 'rb.gy', 't.co'
+    ]
+    for word in suspicious_words:
+        if word in text_lower:
+            return True, f"Suspicious keyword detected: '{word}'"
+    
+    # 2. HTTP/HTTPS full link check - trusted domains allowed
+    trusted_domains = [
+        'amazon.in', 'amazon.com', 'flipkart.com', 'myntra.com', 'ajio.com',
+        'paytm.com', 'phonepe.com', 'google.com', 'googlepay.in', 
+        'swiggy.com', 'zomato.com', 'irctc.co.in', 'makemytrip.com'
+    ]
+    
+    if text_lower.startswith('http://') or text_lower.startswith('https://'):
+        is_trusted = any(domain in text_lower for domain in trusted_domains)
+        if not is_trusted:
+            return True, "Untrusted website link detected"
+    
+    # 3. IP address wali link check
+    if re.search(r'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', text_lower):
+        return True, "IP address based link detected - High risk"
+    
+    return False, "Safe"
 
 def send_otp_mail(to_email, otp, amount, merchant):
     if not SENDGRID_API_KEY:
@@ -114,10 +153,37 @@ def logout():
 @app.route('/check', methods=['POST'])
 def check():
     if 'user' not in session: return redirect('/')
+    
+    merchant_input = request.form['merchant']
+    
+    # ✅ FRAUD CHECK YAHAN HOGA
+    is_fraud, reason = check_fraud_link(merchant_input)
+    
+    if is_fraud:
+        # BLOCK PAGE DIKHAO
+        return f'''
+        {STYLE}
+        <div class="navbar">
+            <b>🏦 SecurePay</b>
+            <div>vanshikauser65@gmail.com | <a href="/logout">Logout</a></div>
+        </div>
+        <div class="container">
+            <div class="block-alert">
+                <h2>🚨 Transaction Blocked!</h2>
+                <p><b>Reason:</b> {reason}</p>
+                <p><b>Merchant Entered:</b> {merchant_input}</p>
+                <p style='margin-top:15px'>This transaction was flagged as suspicious by our AI Security System.</p>
+                <p><b>For your safety, this payment cannot be processed.</b></p>
+            </div>
+            <a href='/dashboard'><button style='background:#1565c0'>← Back to Dashboard</button></a>
+        </div>
+        '''
+    
+    # Agar safe hai to aage badho
     session['txn'] = {
         'card': request.form['card'],
         'amount': request.form['amount'],
-        'merchant': request.form['merchant']
+        'merchant': merchant_input
     }
     card_last4 = request.form['card'][-4:]
     
@@ -132,8 +198,9 @@ def check():
         <table>
             <tr><td><b>Card Number:</b></td><td>**** **** **** {card_last4}</td></tr>
             <tr><td><b>Amount:</b></td><td>₹{request.form['amount']}.00</td></tr>
-            <tr><td><b>Merchant:</b></td><td>{request.form['merchant']}</td></tr>
-            <tr><td><b>Verified As:</b></td><td><span class="badge">RBI APPROVED</span> {request.form['merchant']}</td></tr>
+            <tr><td><b>Merchant:</b></td><td>{merchant_input}</td></tr>
+            <tr><td><b>Verified As:</b></td><td><span class="badge">RBI APPROVED</span> {merchant_input}</td></tr>
+            <tr><td><b>Security Check:</b></td><td><span class="badge">PASSED</span> No fraud detected</td></tr>
             <tr><td><b>Location:</b></td><td>📍 User Location</td></tr>
         </table>
         
