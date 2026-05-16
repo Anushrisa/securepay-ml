@@ -383,6 +383,22 @@ def admin_dashboard():
     if not blocked_rows:
         blocked_rows = '<tr><td colspan="6" style="text-align:center;color:#999">No fraud attempts yet</td></tr>'
 
+    # Verified table rows
+    verified_rows = ""
+    for txn in reversed(success_transactions[-50:]):
+        verified_rows += f'''
+        <tr>
+            <td>{txn['time']}</td>
+            <td>{txn['user']}</td>
+            <td><span class="badge">{txn['merchant']}</span></td>
+            <td>₹{txn['amount']}</td>
+            <td>**** **** **** {txn['card_last4']}</td>
+            <td>{txn['ip']}</td>
+        </tr>
+        '''
+    if not verified_rows:
+        verified_rows = '<tr><td colspan="6" style="text-align:center;color:#999">No verified transactions yet</td></tr>'
+
     return f'''
     {STYLE}
     <div class="navbar">
@@ -422,8 +438,8 @@ def admin_dashboard():
             </div>
         </div>
 
-        <h3>Recent Blocked Transactions</h3>
-        <div id="transactionTable">
+        <h3>🚨 Recent Blocked Transactions</h3>
+        <div id="blockedTable">
         <table>
             <tr>
                 <th>Time</th>
@@ -434,6 +450,21 @@ def admin_dashboard():
                 <th>IP Address</th>
             </tr>
             {blocked_rows}
+        </table>
+        </div>
+
+        <h3 style="margin-top:30px">✅ Recent Verified Transactions</h3>
+        <div id="verifiedTable">
+        <table>
+            <tr>
+                <th>Time</th>
+                <th>User</th>
+                <th>Merchant</th>
+                <th>Amount</th>
+                <th>Card</th>
+                <th>IP Address</th>
+            </tr>
+            {verified_rows}
         </table>
         </div>
     </div>
