@@ -10,7 +10,7 @@ app.secret_key = 'your_secret_key_here_12345'
 
 # ===== SENDGRID SETUP =====
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'your_verified_sender@example.com')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'your_verifiedvanshikauser65@example.com')
 # ==========================
 
 def check_fraud_link(text):
