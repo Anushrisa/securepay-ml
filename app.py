@@ -14,7 +14,7 @@ app.secret_key = 'your_secret_key_here_12345' # Session ke liye zaruri
 # ===== SENDGRID SETUP =====
 # Railway Variables me ye 2 add karna: SENDGRID_API_KEY, SENDER_EMAIL
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'your_verified_sender@example.com')
+SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'your_verified_vanshikauser65@example.com')
 # ==========================
 
 # ===== FRAUD LINK CHECKER =====
