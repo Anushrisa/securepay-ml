@@ -1,28 +1,44 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>SecurePay - Transaction Blocked</title>
+    <title>Transaction Blocked</title>
     <style>
-        body { font-family: Arial; background: #f5f5f5; margin: 0; }
-       .container { max-width: 500px; margin: 100px auto; background: white; padding: 40px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); text-align: center; }
-       .icon { font-size: 80px; color: #dc3545; }
-        h2 { color: #dc3545; margin: 20px 0; }
-       .alert { background: #f8d7da; color: #721c24; padding: 20px; border-radius: 8px; border-left: 5px solid #dc3545; margin: 20px 0; }
-       .btn { display: inline-block; padding: 12px 30px; background: #1e3c72; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+        body {
+            font-family: Arial;
+            text-align: center;
+            padding-top: 100px;
+            background: #ffebee;
+        }
+       .box {
+            background: white;
+            padding: 40px;
+            border-radius: 10px;
+            display: inline-block;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        h1 { color: #d32f2f; }
+        a {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 10px 20px;
+            background: #1976d2;
+            color: white;
+            text-decoration: none;
+            border-radius: 5px;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="icon">🚫</div>
-        <h2>Transaction Blocked</h2>
-        <div class="alert">
-            <strong>Security Alert:</strong><br>
-            {{ reason }}<br><br>
-            <strong>Merchant:</strong> {{ merchant }}<br>
-            <strong>Detected As:</strong> {{ domain }}
-        </div>
-        <p style="color: #666;">For security reasons, this transaction cannot be processed.<br>Please contact your bank if you believe this is an error.</p>
-        <a href="/dashboard" class="btn">Back to Dashboard</a>
+    <div class="box">
+        <h1>🚫 Transaction Blocked</h1>
+        <p><b>Reason:</b> {{ reason }}</p>
+        <p>For your security, this transaction has been cancelled.</p>
+        <a href="/dashboard">← Back to Dashboard</a>
     </div>
+
+    <script>
+        // Page load hote hi popup dikhao
+        alert("🚫 BLOCKED: Suspicious link/fraud content detected!\n\nTransaction cancelled for security reasons.");
+    </script>
 </body>
 </html>
