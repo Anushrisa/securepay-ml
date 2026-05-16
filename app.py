@@ -14,21 +14,23 @@ SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
 FROM_EMAIL = "vanshikauser65@gmail.com"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123" # Isko change kar dena
-DATA_FILE = "blocked_data.json"
+BLOCKED_FILE = "blocked_data.json"
+SUCCESS_FILE = "success_data.json"
 
 # ✅ FILE SE DATA LOAD KARO
-def load_blocked_data():
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, 'r') as f:
+def load_data(filename):
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
             return json.load(f)
     return []
 
 # ✅ FILE ME DATA SAVE KARO
-def save_blocked_data(data):
-    with open(DATA_FILE, 'w') as f:
+def save_data(filename, data):
+    with open(filename, 'w') as f:
         json.dump(data, f, indent=2)
 
-blocked_transactions = load_blocked_data()
+blocked_transactions = load_data(BLOCKED_FILE)
+success_transactions = load_data(SUCCESS_FILE)
 
 STYLE = """
 <style>
@@ -58,6 +60,10 @@ th{background:#f5f5f5;font-weight:600}
 .stat-box{background:#e3f2fd;padding:15px;border-radius:8px;flex:1;text-align:center;min-width:150px}
 .stat-box h2{margin:0;color:#1565c0}
 .stat-box p{margin:5px 0 0 0;color:#666}
+.stat-box.green{background:#e8f5e9}
+.stat-box.green h2{color:#2e7d32}
+.stat-box.red{background:#ffebee}
+.stat-box.red h2{color:#c62828}
 .chart-container{display:flex;gap:20px;margin:20px 0;flex-wrap:wrap}
 .chart-box{flex:1;min-width:300px;background:#fafafa;padding:15px;border-radius:8px}
 .refresh-badge{background:#ff9800;color:white;padding:5px 10px;border-radius:4px;font-size:12px;margin-left:10px}
@@ -72,7 +78,6 @@ def check_fraud_link(text):
 
     text_lower = text.lower()
 
-    # 1. Suspicious keywords check
     suspicious_words = [
         'free', 'lottery', 'prize', 'winner', 'kyc', 'verify', 'urgent',
         'suspended', 'blocked', 'gift', 'reward', 'bonus', 'claim',
@@ -82,10 +87,9 @@ def check_fraud_link(text):
         if word in text_lower:
             return True, f"Suspicious keyword detected: '{word}'"
 
-    # 2. HTTP/HTTPS full link check - trusted domains allowed
     trusted_domains = [
         'amazon.in', 'amazon.com', 'flipkart.com', 'myntra.com', 'ajio.com',
-        'paytm.com', 'phonepe.com', 'google.com', 'googlepay.in',
+        'paytm.com', 'phonepe.com', 'googlepay.in',
         'swiggy.com', 'zomato.com', 'irctc.co.in', 'makemytrip.com'
     ]
 
@@ -94,7 +98,6 @@ def check_fraud_link(text):
         if not is_trusted:
             return True, "Untrusted website link detected"
 
-    # 3. IP address wali link check
     if re.search(r'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', text_lower):
         return True, "IP address based link detected - High risk"
 
@@ -189,7 +192,6 @@ def check():
     is_fraud, reason = check_fraud_link(merchant_input)
 
     if is_fraud:
-        # ✅ BLOCKED TRANSACTION KO FILE ME SAVE KARO
         blocked_transactions.append({
             'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'user': session['user'],
@@ -198,7 +200,7 @@ def check():
             'reason': reason,
             'ip': request.remote_addr
         })
-        save_blocked_data(blocked_transactions)
+        save_data(BLOCKED_FILE, blocked_transactions)
 
         return f'''
         {STYLE}
@@ -290,6 +292,18 @@ def verify():
     if request.form['otp'] == session.get('otp'):
         txn = session.pop('txn')
         session.pop('otp')
+
+        # ✅ SUCCESS TRANSACTION KO SAVE KARO
+        success_transactions.append({
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'user': session['user'],
+            'merchant': txn['merchant'],
+            'amount': txn['amount'],
+            'card_last4': txn['card'][-4:],
+            'ip': request.remote_addr
+        })
+        save_data(SUCCESS_FILE, success_transactions)
+
         return f'''
         {STYLE}
         <div class="navbar">
@@ -338,13 +352,13 @@ def admin_login():
 def admin_dashboard():
     if 'admin' not in session: return redirect('/admin')
 
-    global blocked_transactions
-    blocked_transactions = load_blocked_data() # Har baar fresh load karo
+    global blocked_transactions, success_transactions
+    blocked_transactions = load_data(BLOCKED_FILE)
+    success_transactions = load_data(SUCCESS_FILE)
 
     total_blocked = len(blocked_transactions)
-    free_count = len([t for t in blocked_transactions if 'free' in t['merchant'].lower()])
-    lottery_count = len([t for t in blocked_transactions if 'lottery' in t['merchant'].lower()])
-    link_count = len([t for t in blocked_transactions if 'http' in t['merchant'].lower()])
+    total_verified = len(success_transactions)
+    total_all = total_blocked + total_verified
 
     # Graph ke liye data
     keywords = {'free': 0, 'lottery': 0, 'prize': 0, 'gift': 0, 'kyc': 0, 'bit.ly': 0}
@@ -353,10 +367,10 @@ def admin_dashboard():
             if key in txn['merchant'].lower():
                 keywords[key] += 1
 
-    # Table rows banao
-    table_rows = ""
-    for txn in reversed(blocked_transactions[-100:]): # Last 100 dikhao
-        table_rows += f'''
+    # Blocked table rows
+    blocked_rows = ""
+    for txn in reversed(blocked_transactions[-50:]):
+        blocked_rows += f'''
         <tr>
             <td>{txn['time']}</td>
             <td>{txn['user']}</td>
@@ -366,9 +380,8 @@ def admin_dashboard():
             <td>{txn['ip']}</td>
         </tr>
         '''
-
-    if not table_rows:
-        table_rows = '<tr><td colspan="6" style="text-align:center;color:#999">No fraud attempts yet</td></tr>'
+    if not blocked_rows:
+        blocked_rows = '<tr><td colspan="6" style="text-align:center;color:#999">No fraud attempts yet</td></tr>'
 
     return f'''
     {STYLE}
@@ -381,20 +394,20 @@ def admin_dashboard():
 
         <div class="stats">
             <div class="stat-box">
+                <h2>{total_all}</h2>
+                <p>Total Transactions</p>
+            </div>
+            <div class="stat-box red">
                 <h2>{total_blocked}</h2>
-                <p>Total Blocked</p>
+                <p>Blocked Transactions</p>
+            </div>
+            <div class="stat-box green">
+                <h2>{total_verified}</h2>
+                <p>Verified Transactions</p>
             </div>
             <div class="stat-box">
-                <h2>{free_count}</h2>
-                <p>'Free' Keyword</p>
-            </div>
-            <div class="stat-box">
-                <h2>{lottery_count}</h2>
-                <p>'Lottery' Keyword</p>
-            </div>
-            <div class="stat-box">
-                <h2>{link_count}</h2>
-                <p>Suspicious Links</p>
+                <h2>{round((total_verified/total_all*100) if total_all > 0 else 0, 1)}%</h2>
+                <p>Success Rate</p>
             </div>
         </div>
 
@@ -404,7 +417,7 @@ def admin_dashboard():
                 <canvas id="keywordChart"></canvas>
             </div>
             <div class="chart-box">
-                <h3>Block Types</h3>
+                <h3>Transaction Status</h3>
                 <canvas id="typeChart"></canvas>
             </div>
         </div>
@@ -420,16 +433,14 @@ def admin_dashboard():
                 <th>Reason</th>
                 <th>IP Address</th>
             </tr>
-            {table_rows}
+            {blocked_rows}
         </table>
         </div>
     </div>
 
     <script>
-    // Auto refresh every 10 seconds
     setTimeout(function(){{ location.reload(); }}, 10000);
 
-    // Keyword Chart
     new Chart(document.getElementById('keywordChart'), {{
         type: 'bar',
         data: {{
@@ -443,14 +454,13 @@ def admin_dashboard():
         options: {{responsive: true, plugins: {{legend: {{display: false}}}}}}
     }});
 
-    // Type Chart
     new Chart(document.getElementById('typeChart'), {{
         type: 'doughnut',
         data: {{
-            labels: ['Keyword Block', 'Link Block', 'IP Block'],
+            labels: ['Verified', 'Blocked'],
             datasets: [{{
-                data: [{free_count + lottery_count}, {link_count}, {total_blocked - free_count - lottery_count - link_count}],
-                backgroundColor: ['#e74c3c','#f39c12','#3498db']
+                data: [{total_verified}, {total_blocked}],
+                backgroundColor: ['#2ecc71','#e74c3c']
             }}]
         }},
         options: {{responsive: true}}
