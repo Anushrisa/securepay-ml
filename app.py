@@ -4,13 +4,19 @@ import os
 import urllib.request
 import json
 import re
+from datetime import datetime
 
 app = Flask(__name__)
 app.secret_key = "vanshika-secure-2024"
 
-# ✅ SAFE TARIKA - Railway Variables se key lega
+# ✅ CONFIG
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
-FROM_EMAIL = "vanshikauser65@gmail.com"  # Ye SendGrid me verified hona chahiye
+FROM_EMAIL = "vanshikauser65@gmail.com"
+ADMIN_USERNAME = "admin"
+ADMIN_PASSWORD = "admin123"  # Isko change kar dena
+
+# ✅ BLOCKED TRANSACTIONS MEMORY ME STORE HONGE
+blocked_transactions = []
 
 STYLE = """
 <style>
@@ -18,6 +24,7 @@ body{font-family:Arial,sans-serif;background:#f0f2f5;margin:0;padding:0}
 .navbar{background:#1565c0;color:white;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
 .navbar a{color:white;text-decoration:none;background:#c62828;padding:6px 12px;border-radius:4px;font-size:14px}
 .container{max-width:500px;margin:30px auto;background:white;padding:25px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
+.container-wide{max-width:900px;margin:30px auto;background:white;padding:25px;border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1)}
 h3{color:#1a237e;border-bottom:2px solid #1a237e;padding-bottom:8px;margin-top:0}
 label{display:block;margin:12px 0 4px 0;font-weight:600;color:#333}
 input{width:100%;padding:10px;border:1px solid #ccc;border-radius:4px;box-sizing:border-box}
@@ -26,7 +33,8 @@ button:hover{background:#2e7d32}
 .btn-cancel{background:#d32f2f}
 .btn-cancel:hover{background:#b71c1c}
 table{width:100%;border-collapse:collapse;margin:15px 0}
-td{padding:8px;border-bottom:1px solid #eee}
+td,th{padding:8px;border-bottom:1px solid #eee;text-align:left}
+th{background:#f5f5f5;font-weight:600}
 .badge{background:#43a047;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
 .badge-danger{background:#c62828;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
 .success{color:#2e7d32;background:#e8f5e9;padding:15px;border-radius:8px;text-align:center}
@@ -34,10 +42,14 @@ td{padding:8px;border-bottom:1px solid #eee}
 .flex{display:flex;gap:10px}
 .block-alert{background:#ffcdd2;border:2px solid #c62828;padding:20px;border-radius:8px;text-align:center}
 .block-alert h2{color:#b71c1c;margin:0 0 10px 0}
+.stats{display:flex;gap:15px;margin:20px 0}
+.stat-box{background:#e3f2fd;padding:15px;border-radius:8px;flex:1;text-align:center}
+.stat-box h2{margin:0;color:#1565c0}
+.stat-box p{margin:5px 0 0 0;color:#666}
 </style>
 """
 
-# ✅ NAYA: FRAUD LINK CHECKER FUNCTION
+# ✅ FRAUD LINK CHECKER FUNCTION
 def check_fraud_link(text):
     if not text:
         return False, "Empty merchant"
@@ -95,14 +107,17 @@ def send_otp_mail(to_email, otp, amount, merchant):
     req.add_header('Content-Type', 'application/json')
     urllib.request.urlopen(req, json.dumps(data).encode('utf-8'))
 
+# ==================== USER ROUTES ====================
+
 @app.route('/')
 def home():
     if 'user' in session: return redirect('/dashboard')
+    if 'admin' in session: return redirect('/admin/dashboard')
     return f'''
     {STYLE}
-    <div class="navbar"><b>🏦 SecurePay</b></div>
+    <div class="navbar"><b>🏦 SecurePay</b> <a href="/admin">Admin Login</a></div>
     <div class="container">
-        <h3>Login</h3>
+        <h3>User Login</h3>
         <form action="/login" method="POST">
         <label>Email</label>
         <input name="email" value="vanshikauser65@gmail.com" type="email" required>
@@ -155,12 +170,19 @@ def check():
     if 'user' not in session: return redirect('/')
     
     merchant_input = request.form['merchant']
-    
-    # ✅ FRAUD CHECK YAHAN HOGA
     is_fraud, reason = check_fraud_link(merchant_input)
     
     if is_fraud:
-        # BLOCK PAGE DIKHAO
+        # ✅ BLOCKED TRANSACTION KO SAVE KARO
+        blocked_transactions.append({
+            'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'user': session['user'],
+            'merchant': merchant_input,
+            'amount': request.form['amount'],
+            'reason': reason,
+            'ip': request.remote_addr
+        })
+        
         return f'''
         {STYLE}
         <div class="navbar">
@@ -179,7 +201,6 @@ def check():
         </div>
         '''
     
-    # Agar safe hai to aage badho
     session['txn'] = {
         'card': request.form['card'],
         'amount': request.form['amount'],
@@ -201,15 +222,13 @@ def check():
             <tr><td><b>Merchant:</b></td><td>{merchant_input}</td></tr>
             <tr><td><b>Verified As:</b></td><td><span class="badge">RBI APPROVED</span> {merchant_input}</td></tr>
             <tr><td><b>Security Check:</b></td><td><span class="badge">PASSED</span> No fraud detected</td></tr>
-            <tr><td><b>Location:</b></td><td>📍 User Location</td></tr>
         </table>
         
         <h3>🤖 AI Risk Analysis</h3>
         <table>
-            <tr><td>Risk Score (RandomForest):</td><td>25/100</td></tr>
-            <tr><td>Anomaly Score (IsolationForest):</td><td>25/100</td></tr>
+            <tr><td>Risk Score:</td><td>25/100</td></tr>
+            <tr><td>Anomaly Score:</td><td>25/100</td></tr>
             <tr><td><b>Final Combined Risk:</b></td><td><b>25/100</b></td></tr>
-            <tr><td>AI Method Used:</td><td>Default</td></tr>
         </table>
         
         <p style="text-align:center;color:#666">Do you want to approve this transaction?</p>
@@ -270,6 +289,100 @@ def verify():
         </div>
         '''
     return f'{STYLE}<div class="container"><div class="error">Wrong OTP</div><a href="/dashboard">Back</a></div>'
+
+# ==================== ADMIN ROUTES ====================
+
+@app.route('/admin')
+def admin_login_page():
+    if 'admin' in session: return redirect('/admin/dashboard')
+    return f'''
+    {STYLE}
+    <div class="navbar"><b>🔐 SecurePay Admin</b> <a href="/">User Login</a></div>
+    <div class="container">
+        <h3>Admin Login</h3>
+        <form action="/admin/login" method="POST">
+        <label>Username</label>
+        <input name="username" placeholder="admin" required>
+        <label>Password</label>
+        <input name="password" type="password" placeholder="Enter password" required>
+        <button>Login as Admin</button>
+        </form>
+    </div>
+    '''
+
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
+    if request.form['username'] == ADMIN_USERNAME and request.form['password'] == ADMIN_PASSWORD:
+        session['admin'] = ADMIN_USERNAME
+        return redirect('/admin/dashboard')
+    return f'{STYLE}<div class="container"><div class="error">Wrong Admin Credentials</div><a href="/admin">Try Again</a></div>'
+
+@app.route('/admin/dashboard')
+def admin_dashboard():
+    if 'admin' not in session: return redirect('/admin')
+    
+    total_blocked = len(blocked_transactions)
+    
+    # Table rows banao
+    table_rows = ""
+    for txn in reversed(blocked_transactions[-50:]):  # Last 50 dikhao
+        table_rows += f'''
+        <tr>
+            <td>{txn['time']}</td>
+            <td>{txn['user']}</td>
+            <td><span class="badge-danger">{txn['merchant']}</span></td>
+            <td>₹{txn['amount']}</td>
+            <td>{txn['reason']}</td>
+            <td>{txn['ip']}</td>
+        </tr>
+        '''
+    
+    if not table_rows:
+        table_rows = '<tr><td colspan="6" style="text-align:center;color:#999">No fraud attempts yet</td></tr>'
+    
+    return f'''
+    {STYLE}
+    <div class="navbar">
+        <b>🔐 SecurePay Admin Panel</b>
+        <div>Admin | <a href="/admin/logout">Logout</a></div>
+    </div>
+    <div class="container-wide">
+        <h3>Fraud Detection Dashboard</h3>
+        
+        <div class="stats">
+            <div class="stat-box">
+                <h2>{total_blocked}</h2>
+                <p>Total Blocked</p>
+            </div>
+            <div class="stat-box">
+                <h2>{len([t for t in blocked_transactions if 'free' in t['merchant'].lower()])}</h2>
+                <p>'Free' Keyword</p>
+            </div>
+            <div class="stat-box">
+                <h2>{len([t for t in blocked_transactions if 'lottery' in t['merchant'].lower()])}</h2>
+                <p>'Lottery' Keyword</p>
+            </div>
+        </div>
+        
+        <h3>Recent Blocked Transactions</h3>
+        <table>
+            <tr>
+                <th>Time</th>
+                <th>User</th>
+                <th>Merchant</th>
+                <th>Amount</th>
+                <th>Reason</th>
+                <th>IP Address</th>
+            </tr>
+            {table_rows}
+        </table>
+    </div>
+    '''
+
+@app.route('/admin/logout')
+def admin_logout():
+    session.pop('admin', None)
+    return redirect('/admin')
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
