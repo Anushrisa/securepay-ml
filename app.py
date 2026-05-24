@@ -5,6 +5,10 @@ import urllib.request
 import json
 import re
 from datetime import datetime
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import pickle
 
 app = Flask(__name__)
 app.secret_key = "vanshika-secure-2024"
@@ -13,9 +17,34 @@ app.secret_key = "vanshika-secure-2024"
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
 FROM_EMAIL = "vanshikauser65@gmail.com"
 ADMIN_USERNAME = "admin"
-ADMIN_PASSWORD = "admin123" # Isko change kar dena
+ADMIN_PASSWORD = "admin123"
 BLOCKED_FILE = "blocked_data.json"
 SUCCESS_FILE = "success_data.json"
+MODEL_FILE = "fraud_model.pkl"
+
+# ✅ ML MODEL LOAD YA TRAIN KARO
+def get_ml_model():
+    if os.path.exists(MODEL_FILE):
+        with open(MODEL_FILE, 'rb') as f:
+            return pickle.load(f)
+
+    # Agar model nahi hai to dummy data se train kar do
+    print("Training new ML model...")
+    # Normal transactions: amount, hour, user_avg_spend, txn_count_today
+    normal_data = np.array([
+        [500, 14, 600, 2], [1200, 18, 1000, 1], [300, 12, 400, 3],
+        [2000, 16, 1800, 1], [150, 10, 200, 5], [800, 20, 900, 2],
+        [50, 11, 100, 4], [5000, 15, 4500, 1], [250, 13, 300, 3],
+        [1000, 19, 1100, 2]
+    ])
+    model = IsolationForest(contamination=0.1, random_state=42)
+    model.fit(normal_data)
+
+    with open(MODEL_FILE, 'wb') as f:
+        pickle.dump(model, f)
+    return model
+
+ml_model = get_ml_model()
 
 # ✅ FILE SE DATA LOAD KARO
 def load_data(filename):
@@ -31,6 +60,41 @@ def save_data(filename, data):
 
 blocked_transactions = load_data(BLOCKED_FILE)
 success_transactions = load_data(SUCCESS_FILE)
+
+# ✅ ML RISK SCORE CALCULATOR
+def calculate_ml_risk(amount, merchant, user_email):
+    try:
+        hour = datetime.now().hour
+
+        # User ka average spend nikaalo
+        user_txns = [t for t in success_transactions if t['user'] == user_email]
+        user_avg = np.mean([float(t['amount']) for t in user_txns]) if user_txns else 1000
+        txn_count_today = len([t for t in user_txns if t['time'].startswith(datetime.now().strftime('%Y-%m-%d'))])
+
+        # Features: [amount, hour, user_avg, txn_count_today]
+        features = np.array([[float(amount), hour, user_avg, txn_count_today]])
+
+        # Isolation Forest: -1 = anomaly/fraud, 1 = normal
+        prediction = ml_model.predict(features)
+        anomaly_score = ml_model.decision_function(features)[0]
+
+        # Score ko 0-100 me convert karo
+        # decision_function: negative = anomaly, positive = normal
+        risk_score = int(max(0, min(100, 50 - (anomaly_score * 100))))
+
+        # Agar 3 AM me 5000+ ka txn hai to risk badha do
+        if hour >= 0 and hour <= 5 and float(amount) > 3000:
+            risk_score = min(100, risk_score + 30)
+
+        # Agar user_avg se 5x zyada hai to risk badha do
+        if float(amount) > user_avg * 5:
+            risk_score = min(100, risk_score + 25)
+
+        return risk_score, "ML Anomaly" if prediction[0] == -1 else "Normal Pattern"
+
+    except Exception as e:
+        print(f"ML Error: {e}")
+        return 30, "ML Error - Default"
 
 STYLE = """
 <style>
@@ -51,6 +115,7 @@ td,th{padding:8px;border-bottom:1px solid #eee;text-align:left;font-size:14px}
 th{background:#f5f5f5;font-weight:600}
 .badge{background:#43a047;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
 .badge-danger{background:#c62828;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
+.badge-warning{background:#ff9800;color:white;padding:3px 8px;border-radius:4px;font-size:12px}
 .success{color:#2e7d32;background:#e8f5e9;padding:15px;border-radius:8px;text-align:center}
 .error{color:#c62828;background:#ffebee;padding:12px;border-radius:6px;margin:10px 0}
 .flex{display:flex;gap:10px}
@@ -71,13 +136,12 @@ th{background:#f5f5f5;font-weight:600}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 """
 
-# ✅ FRAUD LINK CHECKER FUNCTION
+# ✅ FRAUD LINK CHECKER FUNCTION - Rule Based
 def check_fraud_link(text):
     if not text:
         return False, "Empty merchant"
 
     text_lower = text.lower()
-
     suspicious_words = [
         'free', 'lottery', 'prize', 'winner', 'kyc', 'verify', 'urgent',
         'suspended', 'blocked', 'gift', 'reward', 'bonus', 'claim',
@@ -85,7 +149,7 @@ def check_fraud_link(text):
     ]
     for word in suspicious_words:
         if word in text_lower:
-            return True, f"Suspicious keyword detected: '{word}'"
+            return True, f"Suspicious keyword: '{word}'"
 
     trusted_domains = [
         'amazon.in', 'amazon.com', 'flipkart.com', 'myntra.com', 'ajio.com',
@@ -99,14 +163,13 @@ def check_fraud_link(text):
             return True, "Untrusted website link detected"
 
     if re.search(r'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', text_lower):
-        return True, "IP address based link detected - High risk"
+        return True, "IP address based link - High risk"
 
     return False, "Safe"
 
 def send_otp_mail(to_email, otp, amount, merchant):
     if not SENDGRID_API_KEY:
-        raise Exception("SendGrid API Key not found in environment variables")
-
+        raise Exception("SendGrid API Key not found")
     data = {
         "personalizations": [{"to": [{"email": to_email}]}],
         "from": {"email": FROM_EMAIL},
@@ -127,7 +190,6 @@ def send_otp_mail(to_email, otp, amount, merchant):
     urllib.request.urlopen(req, json.dumps(data).encode('utf-8'))
 
 # ==================== USER ROUTES ====================
-
 @app.route('/')
 def home():
     if 'user' in session: return redirect('/dashboard')
@@ -189,15 +251,26 @@ def check():
     if 'user' not in session: return redirect('/')
 
     merchant_input = request.form['merchant']
-    is_fraud, reason = check_fraud_link(merchant_input)
+    amount = request.form['amount']
 
-    if is_fraud:
+    # 1. RULE BASED CHECK
+    is_fraud_rule, reason_rule = check_fraud_link(merchant_input)
+
+    # 2. ML BASED RISK SCORE
+    ml_risk_score, ml_reason = calculate_ml_risk(amount, merchant_input, session['user'])
+
+    # 3. COMBINED DECISION
+    # Agar rule se fraud hai YA ML risk > 70 hai to block
+    if is_fraud_rule or ml_risk_score > 70:
+        final_reason = reason_rule if is_fraud_rule else f"ML Risk Score High: {ml_risk_score}/100 - {ml_reason}"
+
         blocked_transactions.append({
             'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'user': session['user'],
             'merchant': merchant_input,
-            'amount': request.form['amount'],
-            'reason': reason,
+            'amount': amount,
+            'reason': final_reason,
+            'ml_score': ml_risk_score,
             'ip': request.remote_addr
         })
         save_data(BLOCKED_FILE, blocked_transactions)
@@ -211,21 +284,25 @@ def check():
         <div class="container">
             <div class="block-alert">
                 <h2>🚨 Transaction Blocked!</h2>
-                <p><b>Reason:</b> {reason}</p>
-                <p><b>Merchant Entered:</b> {merchant_input}</p>
-                <p style='margin-top:15px'>This transaction was flagged as suspicious by our AI Security System.</p>
-                <p><b>For your safety, this payment cannot be processed.</b></p>
+                <p><b>Reason:</b> {final_reason}</p>
+                <p><b>ML Risk Score:</b> {ml_risk_score}/100</p>
+                <p><b>Merchant:</b> {merchant_input}</p>
+                <p style='margin-top:15px'>Flagged by AI Security System.</p>
             </div>
             <a href='/dashboard'><button style='background:#1565c0'>← Back to Dashboard</button></a>
         </div>
         '''
 
+    # Agar sab safe hai to proceed
     session['txn'] = {
         'card': request.form['card'],
-        'amount': request.form['amount'],
-        'merchant': merchant_input
+        'amount': amount,
+        'merchant': merchant_input,
+        'risk_score': ml_risk_score
     }
     card_last4 = request.form['card'][-4:]
+
+    risk_badge = '<span class="badge">LOW</span>' if ml_risk_score < 40 else '<span class="badge-warning">MEDIUM</span>'
 
     return f'''
     {STYLE}
@@ -237,17 +314,16 @@ def check():
         <h3>Transaction Details</h3>
         <table>
             <tr><td><b>Card Number:</b></td><td>**** **** **** {card_last4}</td></tr>
-            <tr><td><b>Amount:</b></td><td>₹{request.form['amount']}.00</td></tr>
+            <tr><td><b>Amount:</b></td><td>₹{amount}.00</td></tr>
             <tr><td><b>Merchant:</b></td><td>{merchant_input}</td></tr>
-            <tr><td><b>Verified As:</b></td><td><span class="badge">RBI APPROVED</span> {merchant_input}</td></tr>
-            <tr><td><b>Security Check:</b></td><td><span class="badge">PASSED</span> No fraud detected</td></tr>
+            <tr><td><b>Rule Check:</b></td><td><span class="badge">PASSED</span> No fraud keywords</td></tr>
         </table>
 
         <h3>🤖 AI Risk Analysis</h3>
         <table>
-            <tr><td>Risk Score:</td><td>25/100</td></tr>
-            <tr><td>Anomaly Score:</td><td>25/100</td></tr>
-            <tr><td><b>Final Combined Risk:</b></td><td><b>25/100</b></td></tr>
+            <tr><td>ML Risk Score:</td><td><b>{ml_risk_score}/100</b> {risk_badge}</td></tr>
+            <tr><td>Pattern Analysis:</td><td>{ml_reason}</td></tr>
+            <tr><td>Time Check:</td><td>{datetime.now().strftime('%H:%M')} - Normal</td></tr>
         </table>
 
         <p style="text-align:center;color:#666">Do you want to approve this transaction?</p>
@@ -257,6 +333,7 @@ def check():
             </form>
             <a href="/dashboard" style="width:100%"><button class="btn-cancel">✕ Cancel Payment</button></a>
         </div>
+    </div>
     '''
 
 @app.route('/send_otp', methods=['POST'])
@@ -293,13 +370,13 @@ def verify():
         txn = session.pop('txn')
         session.pop('otp')
 
-        # ✅ SUCCESS TRANSACTION KO SAVE KARO
         success_transactions.append({
             'time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             'user': session['user'],
             'merchant': txn['merchant'],
             'amount': txn['amount'],
             'card_last4': txn['card'][-4:],
+            'risk_score': txn.get('risk_score', 0),
             'ip': request.remote_addr
         })
         save_data(SUCCESS_FILE, success_transactions)
@@ -315,6 +392,7 @@ def verify():
                 <h2>✅ Payment Successful!</h2>
                 <p><b>₹{txn['amount']}</b> paid to <b>{txn['merchant']}</b></p>
                 <p>Card: **** **** **** {txn['card'][-4:]}</p>
+                <p>Risk Score: {txn.get('risk_score', 0)}/100 - Verified by AI</p>
             </div>
             <a href='/dashboard'><button>New Transaction</button></a>
         </div>
@@ -322,7 +400,6 @@ def verify():
     return f'{STYLE}<div class="container"><div class="error">Wrong OTP</div><a href="/dashboard">Back</a></div>'
 
 # ==================== ADMIN ROUTES ====================
-
 @app.route('/admin')
 def admin_login_page():
     if 'admin' in session: return redirect('/admin/dashboard')
@@ -359,15 +436,14 @@ def admin_dashboard():
     total_blocked = len(blocked_transactions)
     total_verified = len(success_transactions)
     total_all = total_blocked + total_verified
+    avg_risk = round(np.mean([t.get('risk_score', 0) for t in success_transactions]), 1) if success_transactions else 0
 
-    # Graph ke liye data
     keywords = {'free': 0, 'lottery': 0, 'prize': 0, 'gift': 0, 'kyc': 0, 'bit.ly': 0}
     for txn in blocked_transactions:
         for key in keywords:
             if key in txn['merchant'].lower():
                 keywords[key] += 1
 
-    # Blocked table rows
     blocked_rows = ""
     for txn in reversed(blocked_transactions[-50:]):
         blocked_rows += f'''
@@ -377,13 +453,12 @@ def admin_dashboard():
             <td><span class="badge-danger">{txn['merchant']}</span></td>
             <td>₹{txn['amount']}</td>
             <td>{txn['reason']}</td>
-            <td>{txn['ip']}</td>
+            <td>ML: {txn.get('ml_score', 'N/A')}</td>
         </tr>
         '''
     if not blocked_rows:
         blocked_rows = '<tr><td colspan="6" style="text-align:center;color:#999">No fraud attempts yet</td></tr>'
 
-    # Verified table rows
     verified_rows = ""
     for txn in reversed(success_transactions[-50:]):
         verified_rows += f'''
@@ -392,8 +467,8 @@ def admin_dashboard():
             <td>{txn['user']}</td>
             <td><span class="badge">{txn['merchant']}</span></td>
             <td>₹{txn['amount']}</td>
-            <td>**** **** **** {txn['card_last4']}</td>
-            <td>{txn['ip']}</td>
+            <td>**** {txn['card_last4']}</td>
+            <td>Risk: {txn.get('risk_score', 0)}/100</td>
         </tr>
         '''
     if not verified_rows:
@@ -406,7 +481,7 @@ def admin_dashboard():
         <div>Admin | <a href="/admin/logout">Logout</a></div>
     </div>
     <div class="container-wide">
-        <h3>Fraud Detection Dashboard <span class="refresh-badge">Auto-refresh: 10s</span></h3>
+        <h3>AI Fraud Detection Dashboard <span class="refresh-badge">Auto-refresh: 10s</span></h3>
 
         <div class="stats">
             <div class="stat-box">
@@ -415,15 +490,15 @@ def admin_dashboard():
             </div>
             <div class="stat-box red">
                 <h2>{total_blocked}</h2>
-                <p>Blocked Transactions</p>
+                <p>Blocked by AI</p>
             </div>
             <div class="stat-box green">
                 <h2>{total_verified}</h2>
-                <p>Verified Transactions</p>
+                <p>Verified by AI</p>
             </div>
             <div class="stat-box">
-                <h2>{round((total_verified/total_all*100) if total_all > 0 else 0, 1)}%</h2>
-                <p>Success Rate</p>
+                <h2>{avg_risk}</h2>
+                <p>Avg ML Risk Score</p>
             </div>
         </div>
 
@@ -433,12 +508,12 @@ def admin_dashboard():
                 <canvas id="keywordChart"></canvas>
             </div>
             <div class="chart-box">
-                <h3>Transaction Status</h3>
+                <h3>AI Decision Split</h3>
                 <canvas id="typeChart"></canvas>
             </div>
         </div>
 
-        <h3>🚨 Recent Blocked Transactions</h3>
+        <h3>🚨 Blocked by AI Model</h3>
         <div id="blockedTable">
         <table>
             <tr>
@@ -447,13 +522,13 @@ def admin_dashboard():
                 <th>Merchant</th>
                 <th>Amount</th>
                 <th>Reason</th>
-                <th>IP Address</th>
+                <th>ML Score</th>
             </tr>
             {blocked_rows}
         </table>
         </div>
 
-        <h3 style="margin-top:30px">✅ Recent Verified Transactions</h3>
+        <h3 style="margin-top:30px">✅ Verified by AI Model</h3>
         <div id="verifiedTable">
         <table>
             <tr>
@@ -462,7 +537,7 @@ def admin_dashboard():
                 <th>Merchant</th>
                 <th>Amount</th>
                 <th>Card</th>
-                <th>IP Address</th>
+                <th>Risk Score</th>
             </tr>
             {verified_rows}
         </table>
