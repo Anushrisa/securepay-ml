@@ -15,10 +15,6 @@ FROM_EMAIL = "vanshikauser65@gmail.com"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
-# In-memory storage for demo
-if 'transactions' not in session:
-    session['transactions'] = []
-
 STYLE = """
 <style>
 body{font-family:Arial,sans-serif;background:#f0f2f5;margin:0;padding:0}
@@ -49,6 +45,10 @@ th{background:#f5f5f5}
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 """
 
+def init_session():
+    if 'transactions' not in session:
+        session['transactions'] = []
+
 def check_fraud_link(text):
     if not text: return False, "Empty merchant"
     text_lower = text.lower()
@@ -63,7 +63,8 @@ def check_fraud_link(text):
     return False, "Safe"
 
 def send_otp_mail(to_email, otp, amount, merchant):
-    if not SENDGRID_API_KEY: raise Exception("SendGrid API Key not found in environment variables")
+    if not SENDGRID_API_KEY: 
+        raise Exception("SendGrid API Key not found in environment variables")
     data = {
         "personalizations": [{"to": [{"email": to_email}]}],
         "from": {"email": FROM_EMAIL},
@@ -78,7 +79,9 @@ def send_otp_mail(to_email, otp, amount, merchant):
 # ================= USER ROUTES =================
 @app.route('/')
 def home():
-    if 'user' in session: return redirect('/dashboard')
+    init_session()
+    if 'user' in session: 
+        return redirect('/dashboard')
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b></div>
     <div class="container"><h3>User Login</h3>
     <form action="/login" method="POST">
@@ -89,6 +92,7 @@ def home():
 
 @app.route('/login', methods=['POST'])
 def login():
+    init_session()
     if request.form['email'] == "vanshikauser65@gmail.com" and request.form['password'] == "user123":
         session['user'] = "vanshikauser65@gmail.com"
         return redirect('/dashboard')
@@ -96,7 +100,9 @@ def login():
 
 @app.route('/dashboard')
 def dashboard():
-    if 'user' not in session: return redirect('/')
+    init_session()
+    if 'user' not in session: 
+        return redirect('/')
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b>
     <div>vanshikauser65@gmail.com | <a href="/admin/login">Admin</a> | <a href="/logout">Logout</a></div></div>
     <div class="container"><h3>New Transaction</h3>
@@ -114,7 +120,9 @@ def logout():
 
 @app.route('/check', methods=['POST'])
 def check():
-    if 'user' not in session: return redirect('/')
+    init_session()
+    if 'user' not in session: 
+        return redirect('/')
     merchant_input = request.form['merchant']
     is_fraud, reason = check_fraud_link(merchant_input)
     
@@ -146,7 +154,9 @@ def check():
 
 @app.route('/send_otp', methods=['POST'])
 def send_otp():
-    if 'user' not in session: return redirect('/')
+    init_session()
+    if 'user' not in session: 
+        return redirect('/')
     txn = session.get('txn')
     otp = str(random.randint(100000, 999))
     session['otp'] = otp
@@ -163,6 +173,7 @@ def send_otp():
 
 @app.route('/verify', methods=['POST'])
 def verify():
+    init_session()
     if request.form['otp'] == session.get('otp'):
         txn = session.pop('txn')
         session.pop('otp')
@@ -184,7 +195,9 @@ def verify():
 # ================= ADMIN ROUTES =================
 @app.route('/admin/login')
 def admin_login():
-    if 'admin' in session: return redirect('/admin')
+    init_session()
+    if 'admin' in session: 
+        return redirect('/admin')
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay Admin</b></div>
     <div class="container"><h3>Admin Login</h3>
     <form action="/admin/do_login" method="POST">
@@ -195,6 +208,7 @@ def admin_login():
 
 @app.route('/admin/do_login', methods=['POST'])
 def admin_do_login():
+    init_session()
     if request.form['username'] == ADMIN_USERNAME and request.form['password'] == ADMIN_PASSWORD:
         session['admin'] = ADMIN_USERNAME
         return redirect('/admin')
@@ -202,7 +216,9 @@ def admin_do_login():
 
 @app.route('/admin')
 def admin_dashboard():
-    if 'admin' not in session: return redirect('/admin/login')
+    init_session()
+    if 'admin' not in session: 
+        return redirect('/admin/login')
     
     txns = session.get('transactions', [])
     total = len(txns)
