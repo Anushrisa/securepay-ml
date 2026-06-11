@@ -15,7 +15,7 @@ FROM_EMAIL = "vanshikauser65@gmail.com"
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
-# In-memory storage for demo. Page restart par clear ho jayega
+# In-memory storage for demo
 if 'transactions' not in session:
     session['transactions'] = []
 
@@ -214,7 +214,10 @@ def admin_dashboard():
     labels = [t['time'] for t in last_10]
     amounts = [int(t['amount']) if t['status']=='Success' else 0 for t in last_10]
     
-    rows = ''.join([f"<tr><td>{t['time']}</td><td>{t['merchant']}</td><td>₹{t['amount']}</td><td><span class='badge {'badge-danger' if t['status']=='Blocked' else ''}'>{t['status']}</span></td><td>{t['reason']}</td></tr>" for t in reversed(txns[-20:]) or "<tr><td colspan='5'>No transactions yet</td></tr>"
+    rows = ''.join([f"<tr><td>{t['time']}</td><td>{t['merchant']}</td><td>₹{t['amount']}</td><td><span class='badge {'badge-danger' if t['status']=='Blocked' else ''}'>{t['status']}</span></td><td>{t['reason']}</td></tr>" for t in reversed(txns[-20:])])
+    
+    if not rows:
+        rows = "<tr><td colspan='5'>No transactions yet</td></tr>"
     
     return f'''{STYLE}
     <div class="navbar"><b>🏦 SecurePay Admin Panel</b><div>Admin | <a href="/admin/logout">Logout</a></div></div>
