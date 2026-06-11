@@ -41,7 +41,7 @@ th{background:#f5f5f5}
 .card h2{margin:5px 0;color:#1565c0}
 .block-alert{background:#ffcdd2;border:2px solid #c62828;padding:20px;border-radius:8px;text-align:center}
 .block-alert h2{color:#b71c1c;margin:0 0 10px 0}
-pre{background:#f5f5f5;padding:10px;border-radius:4px;overflow-x:auto}
+pre{background:#f5f5f5;padding:10px;border-radius:4px;overflow-x:auto;font-size:13px}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 """
@@ -64,27 +64,37 @@ def check_fraud_link(text):
     return False, "Safe"
 
 def send_otp_mail(to_email, otp, amount, merchant):
-    if not SENDGRID_API_KEY: 
+    if not SENDGRID_API_KEY:
         raise Exception("SENDGRID_API_KEY not found in Railway Variables")
+
     data = {
         "personalizations": [{"to": [{"email": to_email}]}],
-        "from": {"email": FROM_EMAIL},
+        "from": {"email": FROM_EMAIL, "name": "SecurePay"},
         "subject": f"SecurePay OTP: {otp}",
         "content": [{"type": "text/html", "value": f"<div style='font-family:Arial;padding:20px'><h2>SecurePay OTP</h2><h1 style='font-size:32px'>{otp}</h1><p><b>Amount:</b> ₹{amount}</p><p><b>Merchant:</b> {merchant}</p><p style='color:gray'>Valid for 5 minutes</p></div>"}]
     }
+
     req = urllib.request.Request("https://api.sendgrid.com/v3/mail/send")
     req.add_header('Authorization', f'Bearer {SENDGRID_API_KEY}')
     req.add_header('Content-Type', 'application/json')
+
     try:
-        urllib.request.urlopen(req, json.dumps(data).encode('utf-8'))
+        response = urllib.request.urlopen(req, json.dumps(data).encode('utf-8'))
+        print(f"[SendGrid] Success - Status: {response.status}")
+        return True
     except urllib.error.HTTPError as e:
         error_body = e.read().decode()
-        raise Exception(f"SendGrid HTTP {e.code}: {error_body}")
+        print(f"[SendGrid] Error {e.code}: {error_body}")
+        raise Exception(f"SendGrid Error {e.code}: {error_body}")
+    except Exception as e:
+        print(f"[SendGrid] Error: {str(e)}")
+        raise
 
+# ================= USER ROUTES =================
 @app.route('/')
 def home():
     init_session()
-    if 'user' in session: 
+    if 'user' in session:
         return redirect('/dashboard')
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b></div>
     <div class="container"><h3>User Login</h3>
@@ -105,7 +115,7 @@ def login():
 @app.route('/dashboard')
 def dashboard():
     init_session()
-    if 'user' not in session: 
+    if 'user' not in session:
         return redirect('/')
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b>
     <div>vanshikauser65@gmail.com | <a href="/admin/login">Admin</a> | <a href="/logout">Logout</a></div></div>
@@ -125,11 +135,11 @@ def logout():
 @app.route('/check', methods=['POST'])
 def check():
     init_session()
-    if 'user' not in session: 
+    if 'user' not in session:
         return redirect('/')
     merchant_input = request.form['merchant']
     is_fraud, reason = check_fraud_link(merchant_input)
-    
+
     if is_fraud:
         txns = session.get('transactions', [])
         txns.append({'time': datetime.now().strftime('%H:%M:%S'),'merchant': merchant_input,'amount': request.form['amount'],'status': 'Blocked','reason': reason})
@@ -138,7 +148,7 @@ def check():
         <div class="container"><div class="block-alert"><h2>🚨 Transaction Blocked!</h2>
         <p><b>Reason:</b> {reason}</p><p><b>Merchant:</b> {merchant_input}</p></div>
         <a href='/dashboard'><button>Back to Dashboard</button></a></div>'''
-    
+
     session['txn'] = {'card': request.form['card'],'amount': request.form['amount'],'merchant': merchant_input}
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b><div>vanshikauser65@gmail.com | <a href="/logout">Logout</a></div></div>
     <div class="container"><h3>Transaction Details</h3>
@@ -153,27 +163,31 @@ def check():
 @app.route('/send_otp', methods=['POST'])
 def send_otp():
     init_session()
-    if 'user' not in session: 
+    if 'user' not in session:
         return redirect('/')
     txn = session.get('txn')
     if not txn:
         return f'{STYLE}<div class="container"><div class="error">Session expired. Start again.</div><a href="/dashboard">Back</a></div>'
-    
+
     otp = str(random.randint(100000, 999))
     session['otp'] = otp
-    
+
     try:
         send_otp_mail("vanshikauser65@gmail.com", otp, txn['amount'], txn['merchant'])
         return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b><div>vanshikauser65@gmail.com | <a href="/logout">Logout</a></div></div>
         <div class="container"><h3>OTP Verification</h3>
-        <p>OTP sent to vanshikauser65@gmail.com</p>
+        <p>OTP sent to {FROM_EMAIL}</p>
+        <p style="color:gray;font-size:13px">Check spam folder also</p>
         <form action="/verify" method="POST">
         <label>Enter 6-digit OTP</label><input name="otp" maxlength="6" required>
         <button>Verify & Pay</button></form></div>'''
     except Exception as e:
         return f'''{STYLE}<div class="container">
-        <div class="error"><b>OTP Send Failed:</b><br><pre>{str(e)}</pre></div>
-        <p><b>Check:</b> SendGrid me {FROM_EMAIL} verify kiya hai kya?</p>
+        <div class="error"><b>OTP Send Failed:</b><pre>{str(e)}</pre></div>
+        <p><b>Fix:</b><br>
+        1. Check SENDGRID_API_KEY in Railway Variables<br>
+        2. Verify {FROM_EMAIL} in SendGrid > Settings > Sender Authentication<br>
+        3. Check Railway Logs for full error</p>
         <a href="/dashboard"><button>Back</button></a></div>'''
 
 @app.route('/verify', methods=['POST'])
@@ -184,7 +198,7 @@ def verify():
         session.pop('otp', None)
         if not txn:
             return f'{STYLE}<div class="container"><div class="error">Session expired. Start again.</div><a href="/dashboard">Back</a></div>'
-        
+
         txns = session.get('transactions', [])
         txns.append({'time': datetime.now().strftime('%H:%M:%S'),'merchant': txn['merchant'],'amount': txn['amount'],'status': 'Success','reason': '-'})
         session['transactions'] = txns
@@ -194,10 +208,11 @@ def verify():
         <a href='/dashboard'><button>New Transaction</button></a></div>'''
     return f'{STYLE}<div class="container"><div class="error">Wrong OTP</div><a href="/dashboard">Back</a></div>'
 
+# ================= ADMIN ROUTES =================
 @app.route('/admin/login')
 def admin_login():
     init_session()
-    if 'admin' in session: 
+    if 'admin' in session:
         return redirect('/admin')
     return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay Admin</b></div>
     <div class="container"><h3>Admin Login</h3>
@@ -218,24 +233,24 @@ def admin_do_login():
 @app.route('/admin')
 def admin_dashboard():
     init_session()
-    if 'admin' not in session: 
+    if 'admin' not in session:
         return redirect('/admin/login')
-    
+
     txns = session.get('transactions', [])
     total = len(txns)
     success = len([t for t in txns if t['status'] == 'Success'])
     blocked = len([t for t in txns if t['status'] == 'Blocked'])
     total_amount = sum([int(t['amount']) for t in txns if t['status'] == 'Success'])
-    
+
     last_10 = txns[-10:]
     labels = [t['time'] for t in last_10]
     amounts = [int(t['amount']) if t['status']=='Success' else 0 for t in last_10]
-    
+
     rows = ''.join([f"<tr><td>{t['time']}</td><td>{t['merchant']}</td><td>₹{t['amount']}</td><td><span class='badge {'badge-danger' if t['status']=='Blocked' else ''}'>{t['status']}</span></td><td>{t['reason']}</td></tr>" for t in reversed(txns[-20:])])
-    
+
     if not rows:
         rows = "<tr><td colspan='5'>No transactions yet</td></tr>"
-    
+
     return f'''{STYLE}
     <div class="navbar"><b>🏦 SecurePay Admin Panel</b><div>Admin | <a href="/admin/logout">Logout</a></div></div>
     <div class="container">
