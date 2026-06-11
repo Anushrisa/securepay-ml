@@ -2,6 +2,7 @@ from flask import Flask, request, redirect, session
 import random
 import os
 import urllib.request
+import urllib.error
 import json
 import re
 from datetime import datetime
@@ -10,13 +11,12 @@ app = Flask(__name__)
 app.secret_key = "vanshika-secure-2024"
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY')
-FROM_EMAIL = "vanshikauser65@gmail.com"
+FROM_EMAIL = os.environ.get('SMTP_EMAIL', "vanshikauser65@gmail.com")
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "admin123"
 
-STYLE = """
-<style>
+STYLE = """<style>
 body{font-family:Arial,sans-serif;background:#f0f2f5;margin:0;padding:0}
 .navbar{background:#1565c0;color:white;padding:12px 20px;display:flex;justify-content:space-between;align-items:center}
 .navbar a{color:white;text-decoration:none;background:#c62828;padding:6px 12px;border-radius:4px;font-size:14px;margin-left:8px}
@@ -41,6 +41,7 @@ th{background:#f5f5f5}
 .card h2{margin:5px 0;color:#1565c0}
 .block-alert{background:#ffcdd2;border:2px solid #c62828;padding:20px;border-radius:8px;text-align:center}
 .block-alert h2{color:#b71c1c;margin:0 0 10px 0}
+pre{background:#f5f5f5;padding:10px;border-radius:4px;overflow-x:auto}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 """
@@ -74,9 +75,12 @@ def send_otp_mail(to_email, otp, amount, merchant):
     req = urllib.request.Request("https://api.sendgrid.com/v3/mail/send")
     req.add_header('Authorization', f'Bearer {SENDGRID_API_KEY}')
     req.add_header('Content-Type', 'application/json')
-    urllib.request.urlopen(req, json.dumps(data).encode('utf-8'))
+    try:
+        urllib.request.urlopen(req, json.dumps(data).encode('utf-8'))
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        raise Exception(f"SendGrid HTTP {e.code}: {error_body}")
 
-# ================= USER ROUTES =================
 @app.route('/')
 def home():
     init_session()
@@ -128,13 +132,7 @@ def check():
     
     if is_fraud:
         txns = session.get('transactions', [])
-        txns.append({
-            'time': datetime.now().strftime('%H:%M:%S'),
-            'merchant': merchant_input,
-            'amount': request.form['amount'],
-            'status': 'Blocked',
-            'reason': reason
-        })
+        txns.append({'time': datetime.now().strftime('%H:%M:%S'),'merchant': merchant_input,'amount': request.form['amount'],'status': 'Blocked','reason': reason})
         session['transactions'] = txns
         return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b><div>vanshikauser65@gmail.com | <a href="/logout">Logout</a></div></div>
         <div class="container"><div class="block-alert"><h2>🚨 Transaction Blocked!</h2>
@@ -158,6 +156,9 @@ def send_otp():
     if 'user' not in session: 
         return redirect('/')
     txn = session.get('txn')
+    if not txn:
+        return f'{STYLE}<div class="container"><div class="error">Session expired. Start again.</div><a href="/dashboard">Back</a></div>'
+    
     otp = str(random.randint(100000, 999))
     session['otp'] = otp
     
@@ -169,31 +170,23 @@ def send_otp():
         <form action="/verify" method="POST">
         <label>Enter 6-digit OTP</label><input name="otp" maxlength="6" required>
         <button>Verify & Pay</button></form></div>'''
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode()
-        return f'''{STYLE}<div class="container">
-        <div class="error"><b>SendGrid Error {e.code}:</b><br><pre>{error_body}</pre></div>
-        <p><b>Fix:</b> Check SENDGRID_API_KEY in Railway Variables and verify {FROM_EMAIL} in SendGrid</p>
-        <a href="/dashboard"><button>Back</button></a></div>'''
     except Exception as e:
         return f'''{STYLE}<div class="container">
-        <div class="error"><b>Error:</b> {str(e)}</div>
+        <div class="error"><b>OTP Send Failed:</b><br><pre>{str(e)}</pre></div>
+        <p><b>Check:</b> SendGrid me {FROM_EMAIL} verify kiya hai kya?</p>
         <a href="/dashboard"><button>Back</button></a></div>'''
 
 @app.route('/verify', methods=['POST'])
 def verify():
     init_session()
     if request.form['otp'] == session.get('otp'):
-        txn = session.pop('txn')
-        session.pop('otp')
+        txn = session.pop('txn', None)
+        session.pop('otp', None)
+        if not txn:
+            return f'{STYLE}<div class="container"><div class="error">Session expired. Start again.</div><a href="/dashboard">Back</a></div>'
+        
         txns = session.get('transactions', [])
-        txns.append({
-            'time': datetime.now().strftime('%H:%M:%S'),
-            'merchant': txn['merchant'],
-            'amount': txn['amount'],
-            'status': 'Success',
-            'reason': '-'
-        })
+        txns.append({'time': datetime.now().strftime('%H:%M:%S'),'merchant': txn['merchant'],'amount': txn['amount'],'status': 'Success','reason': '-'})
         session['transactions'] = txns
         return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b><div>vanshikauser65@gmail.com | <a href="/logout">Logout</a></div></div>
         <div class="container"><div class="success"><h2>✅ Payment Successful!</h2>
@@ -201,7 +194,6 @@ def verify():
         <a href='/dashboard'><button>New Transaction</button></a></div>'''
     return f'{STYLE}<div class="container"><div class="error">Wrong OTP</div><a href="/dashboard">Back</a></div>'
 
-# ================= ADMIN ROUTES - SIMPLE LOGIN =================
 @app.route('/admin/login')
 def admin_login():
     init_session()
@@ -254,29 +246,16 @@ def admin_dashboard():
         <div class="card"><h2>{blocked}</h2><p>Blocked</p></div>
         <div class="card"><h2>₹{total_amount}</h2><p>Total Amount</p></div>
     </div>
-    
     <h3>Transaction Trend - Last 10</h3>
     <canvas id="txnChart" height="80"></canvas>
-    
     <h3>Recent Transactions</h3>
     <table><tr><th>Time</th><th>Merchant</th><th>Amount</th><th>Status</th><th>Reason</th></tr>{rows}</table>
     </div>
-    
     <script>
     const ctx = document.getElementById('txnChart');
     new Chart(ctx, {{
         type: 'line',
-        data: {{
-            labels: {json.dumps(labels)},
-            datasets: [{{
-                label: 'Amount ₹',
-                data: {json.dumps(amounts)},
-                borderColor: '#1565c0',
-                backgroundColor: 'rgba(21,101,192,0.2)',
-                tension: 0.3,
-                fill: true
-            }}]
-        }},
+        data: {{labels: {json.dumps(labels)},datasets: [{{label: 'Amount ₹',data: {json.dumps(amounts)},borderColor: '#1565c0',backgroundColor: 'rgba(21,101,192,0.2)',tension: 0.3,fill: true}}]}},
         options: {{responsive: true, scales: {{y: {{beginAtZero: true}}}}}}
     }});
     </script>'''
@@ -285,6 +264,12 @@ def admin_dashboard():
 def admin_logout():
     session.pop('admin', None)
     return redirect('/admin/login')
+
+@app.errorhandler(500)
+def internal_error(e):
+    return f'''{STYLE}<div class="container">
+    <div class="error"><b>500 Internal Error:</b><br><pre>{str(e)}</pre></div>
+    <a href="/"><button>Go Home</button></a></div>''', 500
 
 if __name__ == "__main__":
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
