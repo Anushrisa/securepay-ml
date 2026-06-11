@@ -64,7 +64,7 @@ def check_fraud_link(text):
 
 def send_otp_mail(to_email, otp, amount, merchant):
     if not SENDGRID_API_KEY: 
-        raise Exception("SendGrid API Key not found in environment variables")
+        raise Exception("SENDGRID_API_KEY not found in Railway Variables")
     data = {
         "personalizations": [{"to": [{"email": to_email}]}],
         "from": {"email": FROM_EMAIL},
@@ -160,6 +160,7 @@ def send_otp():
     txn = session.get('txn')
     otp = str(random.randint(100000, 999))
     session['otp'] = otp
+    
     try:
         send_otp_mail("vanshikauser65@gmail.com", otp, txn['amount'], txn['merchant'])
         return f'''{STYLE}<div class="navbar"><b>🏦 SecurePay</b><div>vanshikauser65@gmail.com | <a href="/logout">Logout</a></div></div>
@@ -168,8 +169,16 @@ def send_otp():
         <form action="/verify" method="POST">
         <label>Enter 6-digit OTP</label><input name="otp" maxlength="6" required>
         <button>Verify & Pay</button></form></div>'''
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        return f'''{STYLE}<div class="container">
+        <div class="error"><b>SendGrid Error {e.code}:</b><br><pre>{error_body}</pre></div>
+        <p><b>Fix:</b> Check SENDGRID_API_KEY in Railway Variables and verify {FROM_EMAIL} in SendGrid</p>
+        <a href="/dashboard"><button>Back</button></a></div>'''
     except Exception as e:
-        return f'{STYLE}<div class="container"><div class="error">Mail Error: {e}</div><a href="/dashboard">Back</a></div>'
+        return f'''{STYLE}<div class="container">
+        <div class="error"><b>Error:</b> {str(e)}</div>
+        <a href="/dashboard"><button>Back</button></a></div>'''
 
 @app.route('/verify', methods=['POST'])
 def verify():
@@ -192,7 +201,7 @@ def verify():
         <a href='/dashboard'><button>New Transaction</button></a></div>'''
     return f'{STYLE}<div class="container"><div class="error">Wrong OTP</div><a href="/dashboard">Back</a></div>'
 
-# ================= ADMIN ROUTES =================
+# ================= ADMIN ROUTES - SIMPLE LOGIN =================
 @app.route('/admin/login')
 def admin_login():
     init_session()
